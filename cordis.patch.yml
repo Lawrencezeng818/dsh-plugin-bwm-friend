@@ -1,0 +1,8 @@
+# dsh-plugin-bwm-friend bundle patch (P0 skeleton)
+#
+# 只做加法：insert 一个 host 行（bwm-friend → 本包名），
+# client 半经 package.json 的 dsh.client manifest 由 host 自动扫描加载。
+- insert:
+    - id: bwm-friend
+      name: 'dsh-plugin-bwm-friend'
+      inject: ['webServer']

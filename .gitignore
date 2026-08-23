@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.credentials.yaml
+
+# Build / OS
+.DS_Store
+*.log
+dist/
+*.tsbuildinfo
+
+# Local dev paths
+.worktrees/
