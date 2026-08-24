@@ -353,6 +353,7 @@ function createRequestMachine(bus, context) {
       apply('thinking', { requestId: (p && p.requestId) || null, startedAt: new Date().toISOString() });
     }),
     bus.on('conversation.request.reply', () => apply('replying')),
+    bus.on('conversation.request.cancel', () => apply('idle', { requestId: null, startedAt: null, cancelled: true })),
     bus.on('conversation.request.end', () => apply('idle', { requestId: null, startedAt: null })),
   ];
   return () => off.forEach((d) => d());

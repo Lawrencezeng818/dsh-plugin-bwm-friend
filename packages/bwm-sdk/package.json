@@ -1,0 +1,14 @@
+{
+  "name": "@laikaton/bwm-sdk",
+  "version": "0.1.0",
+  "description": "BWM Agent Runtime SDK — 开发者友好 API（Agent/Persona/Presence）。协议开放（Apache-2.0），核心决策闭源在 @laikaton/bwm-runtime-core。",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "files": ["src/"],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": ["bwm", "agent-runtime", "dsd", "presence", "persona"],
+  "engines": { "node": ">=18" }
+}
