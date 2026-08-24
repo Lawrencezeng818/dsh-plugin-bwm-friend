@@ -146,3 +146,40 @@ test('voice: listen 无麦克风环境 → reject no-mic', async () => {
   // Node 环境 navigator 未定义 → no-mic
   await assert.rejects(() => sdk.voice.listen(() => {}), /no-mic/);
 });
+
+/* ── P2-Proactive：数字人主动行为 ── */
+test('proactive: trigger 生成开场白 + 生命周期 + proactive.message 广播', async () => {
+  const sdk = createBwmRuntime({
+    transport: async (path, body) => ({ reply: '嗨，最近怎么样？', requestId: body.requestId }),
+  });
+  const msgs = [];
+  sdk.proactive.on((p) => msgs.push(p));
+  const res = await sdk.proactive.trigger({ reason: 'greeting' });
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.reply, '嗨，最近怎么样？');
+  assert.strictEqual(res.reason, 'greeting');
+  assert.strictEqual(msgs.length, 1);
+  assert.strictEqual(msgs[0].reply, '嗨，最近怎么样？');
+  // 生命周期完整回 idle
+  assert.strictEqual(sdk.agent.status().state, 'idle');
+  // presence 回 idle
+  assert.strictEqual(sdk.presence.state(), 'idle');
+});
+
+test('proactive: 忙时不打断（agent.send 进行中 → trigger busy）', async () => {
+  const sdk = createBwmRuntime({ transport: () => new Promise(() => {}) }); // 永不返回
+  sdk.agent.send('long task'); // 挂起
+  const res = await sdk.proactive.trigger({ reason: 'checkin' });
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, 'busy');
+});
+
+test('proactive: 网络失败 → ok:false + 状态回 idle', async () => {
+  const sdk = createBwmRuntime({
+    transport: async () => { throw new Error('network'); },
+  });
+  const res = await sdk.proactive.trigger({ reason: 'memory' });
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, 'network');
+  assert.strictEqual(sdk.agent.status().state, 'idle');
+});

@@ -93,6 +93,46 @@ function createBwmRuntime(opts = {}) {
     },
   };
 
+  /* ── Proactive API（P2-Proactive：数字人主动行为）──
+   * idle → presence trigger（thinking 态）→ Mira 生成开场白 → replying → idle
+   * 复用 requestState 生命周期；忙时不打断（busy 拒绝）
+   */
+  const proactive = {
+    // 触发主动行为：Mira 主动生成开场白（greeting/checkin/memory）
+    async trigger({ reason = 'greeting' } = {}) {
+      if (agent.status().state !== 'idle') return { ok: false, error: 'busy' }; // 忙时不打断
+      const requestId = `pro-${++seq}-${Date.now()}`;
+      bus.emit(REQUEST_CHANNELS.start, { requestId, proactive: true });
+      bus.emit('agent.thinking.start'); // presence → thinking（数字人思考态）
+      try {
+        const data = await post('/bwm-friend/companion/chat', {
+          message: '',
+          history: [],
+          requestId,
+          proactive: { reason },
+        });
+        if (data && data.reply) {
+          bus.emit(REQUEST_CHANNELS.reply);
+          bus.emit(REQUEST_CHANNELS.end);
+          bus.emit('agent.thinking.end'); // presence → idle
+          bus.emit('proactive.message', { reply: data.reply, reason, requestId }); // UI 显示主动气泡
+          return { ok: true, reply: data.reply, reason, requestId };
+        }
+        bus.emit(REQUEST_CHANNELS.end);
+        bus.emit('agent.thinking.end');
+        return { ok: false, error: data && data.error ? data.error : 'empty-reply', requestId };
+      } catch (e) {
+        bus.emit(REQUEST_CHANNELS.end);
+        bus.emit('agent.thinking.end');
+        return { ok: false, error: e && e.name === 'TimeoutError' ? 'timeout' : 'network', requestId };
+      }
+    },
+    // 订阅主动消息（宿主 UI 显示主动气泡 + TTS 朗读）
+    on(callback) {
+      return bus.on('proactive.message', (p) => callback(p));
+    },
+  };
+
   /* ── Persona API（P3 冻结 + P2-P switch 落地）── */
   const persona = {
     // 当前人格（identity + personality 合并视图）
@@ -204,6 +244,7 @@ function createBwmRuntime(opts = {}) {
 
   return {
     agent,
+    proactive,
     persona,
     presence,
     memory,
