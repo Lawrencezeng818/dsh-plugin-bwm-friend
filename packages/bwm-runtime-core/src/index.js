@@ -79,6 +79,65 @@ function createEventBus() {
   };
 }
 
+/* ── Capability Layer（P1.3：能力协商——多宿主降级运行，接近 Agent Plugin ABI）──
+ * 能力结构 { name, version, level, constraints }（评审 R5：不只"有没有"，还要版本/等级/约束）
+ * 协议公开（capability 列表+协商格式）；决策私有（降级策略阈值在 Runtime 内部）
+ */
+const RUNTIME_CAPABILITIES = [
+  { name: 'presence-provide', version: '1.0', level: 'full', constraints: { presence: 9, modes: 3 } },
+  { name: 'context-govern',   version: '1.0', level: 'full', constraints: { domains: 8, writable: 'ownership-model' } },
+  { name: 'ledger-record',    version: '1.0', level: 'full', constraints: { entries: 'append-only', retention: 500 } },
+  { name: 'identity-hold',    version: '1.0', level: 'basic', constraints: { persona: 'mira' } },
+  { name: 'evolution-run',    version: '1.0', level: 'basic', constraints: { algorithm: 'proprietary' } },
+];
+
+// 语义化版本比较：a >= b → ≥0；a < b → <0（'1.0' === '1.0.0'）
+function compareVersion(a, b) {
+  const pa = String(a || '0').split('.').map(Number);
+  const pb = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+// 能力协商（纯函数）：shell 需求 ∩ runtime 提供 → matched / degraded / missing + mode
+// 版本匹配：runtime.version >= shell.version → matched；否则 degraded（runtime 旧）
+// mode：无需求或全部匹配 = full；有任何 degraded/missing = lite（降级运行，UI 完整）
+function negotiate(requires = [], runtimeCaps = RUNTIME_CAPABILITIES) {
+  const norm = (caps) => caps.map((c) => (typeof c === 'string' ? { name: c, version: '1.0' } : c));
+  const shell = norm(requires);
+  const rt = new Map(norm(runtimeCaps).map((c) => [c.name, c]));
+  const matched = [];
+  const degraded = [];
+  const missing = [];
+  for (const sc of shell) {
+    const rc = rt.get(sc.name);
+    if (!rc) {
+      missing.push({ name: sc.name, shell: sc.version, reason: 'not-provided' });
+      continue;
+    }
+    if (compareVersion(rc.version, sc.version) >= 0) {
+      matched.push({
+        name: sc.name,
+        shell: sc.version,
+        runtime: rc.version,
+        level: rc.level || sc.level || 'basic',
+        constraints: rc.constraints || null,
+      });
+    } else {
+      degraded.push({ name: sc.name, shell: sc.version, runtime: rc.version, reason: 'version-mismatch' });
+    }
+  }
+  return {
+    matched,
+    degraded,
+    missing,
+    mode: degraded.length === 0 && missing.length === 0 ? 'full' : 'lite',
+  };
+}
+
 /* ── Runtime 协议面（BWM Protocol v1：hello/welcome + subscribe/emit）── */
 function createRuntime() {
   const bus = createEventBus();
@@ -86,16 +145,19 @@ function createRuntime() {
   return {
     protocol: 'bwm',
     version: '1.0',
-    // Shell → Runtime 握手（格式公开，策略私有——决策在 Runtime 内部）
-    hello({ shellVersion = '0.0.0', dshVersion = 'unknown', capabilities = [] } = {}) {
-      handshake = { shellVersion, dshVersion, capabilities, at: new Date().toISOString() };
+    // Shell → Runtime 握手（格式公开，策略私有——协商结果由 negotiate 计算）
+    // capabilities：shell 自身提供的能力（信息性，供 runtime 了解宿主）；requires：shell 需要 runtime 提供的核心能力（决定 full/lite）
+    hello({ shellVersion = '0.0.0', dshVersion = 'unknown', capabilities = [], requires = [] } = {}) {
+      const negotiation = negotiate(requires, RUNTIME_CAPABILITIES);
+      handshake = { shellVersion, dshVersion, capabilities, requires, negotiation, at: new Date().toISOString() };
       return {
         protocol: 'bwm',
         version: '1.0',
         runtimeVersion: '0.1.0',
-        mode: 'full', // P1.1：同进程内联即 full；未来 runtime 服务化后按可用性协商
+        mode: negotiation.mode, // full：需求全部满足；lite：部分缺失/降级（UI 完整，降级体验）
         presence: ['idle', 'attention', 'thinking', 'executing', 'speaking', 'success', 'error', 'offline', 'transition'],
-        capabilities: ['presence-provide', 'context-govern', 'ledger-record', 'identity-hold', 'evolution-run'],
+        capabilities: RUNTIME_CAPABILITIES.map((c) => c.name),
+        negotiation, // { matched, degraded, missing, mode } —— Shell 按此降级对应 UI
       };
     },
     // Shell 订阅（协议事件）
@@ -111,4 +173,4 @@ function createRuntime() {
   };
 }
 
-module.exports = { createEventBus, createRuntime, EVENT_VERSIONS };
+module.exports = { createEventBus, createRuntime, EVENT_VERSIONS, negotiate, compareVersion, RUNTIME_CAPABILITIES };

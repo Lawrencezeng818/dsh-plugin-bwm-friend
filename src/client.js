@@ -40,6 +40,24 @@ const EMBEDDED_SELECTORS = {
   stable: ['[data-slot="conversation.input.model"]', '[role=treeitem]', '[class*=sidebarCol]', '[class*=centerCol]', '[class*=detailsCol]'],
 };
 
+/* ── 1.5 Capability Layer（P1.3：Shell 侧声明——信息性提供 + 需求性 requires）──
+ * capabilities：Shell 自身 UI 能力（信息性，供 Runtime 了解宿主，不参与协商裁决）
+ * requires：Shell 需要 Runtime 提供的核心能力（决定 full/lite 模式与降级 UI）
+ * 与 docs/BWM-PROTOCOL-v1.md §4.1/§4.2 对齐；协商算法在 runtime-core（negotiate，闭源核心）
+ */
+const SHELL_CAPABILITIES = [
+  { name: 'video-layer', version: '1.0', level: 'full', constraints: { layout: 'right-panel' } },
+  { name: 'composer-skin', version: '1.0', level: 'full', constraints: { style: 'bwm-mint' } },
+  { name: 'sidebar-drawer', version: '1.0', level: 'full', constraints: { width: 320 } },
+  { name: 'pop-session', version: '1.0', level: 'full', constraints: { position: 'screen-right' } },
+  { name: 'header-strip', version: '1.0', level: 'full', constraints: { height: 44 } },
+];
+const SHELL_REQUIRES = [
+  { name: 'presence-provide', version: '1.0' }, // presence 联动（数字人状态）
+  { name: 'context-govern', version: '1.0' },   // 8 域共享上下文
+  { name: 'ledger-record', version: '1.0' },    // 行为生命周期记录
+];
+
 /* ── 1. Event Kernel（已迁入 @laikaton/bwm-runtime-core，P1.1）──────────────
  * createEventBus / EVENT_VERSIONS 定义已移除——Shell 不再拥有核心；
  * 经 require('@laikaton/bwm-runtime-core') 的 createRuntime() 协议面消费。
@@ -918,6 +936,23 @@ function applyEmbeddedHarness(ctx) {
   //  先保住原生功能（模型菜单/推理等级/点击），圆环位置作为后续单独的低风险优化再做。
   //  2026-08-24 更新：圆环位置已通过 CSS 修复（[class*=trailing] > span width auto +
   //  [data-slot="conversation.input.model"] min-width auto），原生 ContextMeter 位于模型按钮与发送键之间。）
+
+  // P1.3：嵌入式模式同样执行 Shell 握手（Capability Layer）——暴露协商结果供降级 UI/调试
+  try {
+    const runtime = createRuntime();
+    const welcome = runtime.hello({
+      shellVersion: '0.3.0',
+      dshVersion: 'embedded',
+      capabilities: SHELL_CAPABILITIES,
+      requires: SHELL_REQUIRES,
+    });
+    if (typeof window !== 'undefined') {
+      window.__bwm = Object.assign(window.__bwm || {}, {
+        runtime: { mode: welcome.mode, negotiation: welcome.negotiation, versions: runtime.versions },
+      });
+    }
+  } catch (_) { /* 嵌入式握手失败不影响原生 DSH（no-op 原则） */ }
+
   return () => {};
 }
 
@@ -938,11 +973,20 @@ function apply(ctx) {
 
   // Phase 0：Event Kernel + Shared Agent Context（暴露给 DSH 接入适配器与调试）
   // P1.1：Event Kernel 经 Runtime 协议面（createRuntime）——Shell 不持有核心
+  // P1.3：Capability Layer——hello 握手协商（capabilities 提供声明 + requires 需求声明 → negotiation）
   const runtime = createRuntime();
   const bus = runtime.bus;
   const context = createAgentContext();
   const adapter = resolveAdapter();
-  window.__bwm = { bus, context, adapter, registry: ADAPTER_REGISTRY, versions: runtime.versions, embeddedSelectors: EMBEDDED_SELECTORS };
+  let dshVersion = 'unknown';
+  try { dshVersion = (typeof window !== 'undefined' && window.__DSH_VERSION__) || 'embedded'; } catch (_) { /* noop */ }
+  const welcome = runtime.hello({
+    shellVersion: '0.3.0',
+    dshVersion,
+    capabilities: SHELL_CAPABILITIES,
+    requires: SHELL_REQUIRES,
+  });
+  window.__bwm = { bus, context, adapter, registry: ADAPTER_REGISTRY, versions: runtime.versions, embeddedSelectors: EMBEDDED_SELECTORS, negotiation: welcome.negotiation, mode: welcome.mode, shell: { capabilities: SHELL_CAPABILITIES, requires: SHELL_REQUIRES } };
   wireLedger(bus, context); // Agent Runtime MVP 闭环
 
   // R1：强制横屏（竖屏提示层 + 横屏锁定）
