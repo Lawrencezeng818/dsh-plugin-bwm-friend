@@ -861,11 +861,12 @@ function applyEmbeddedHarness(ctx) {
   // 接收父页消息：打开/关闭侧栏抽屉（原生侧栏 = 会话/工作区树，用于切多会话）
   const sb = document.querySelector('[class*=sidebarCol]');
   window.addEventListener('message', (e) => {
-    if (e && e.data && e.data.type === 'bwm-embedded') {
+    if (!e || e.origin !== location.origin) return; // P0 安全：仅接受同源消息
+    if (e.data && e.data.type === 'bwm-embedded') {
       if (e.data.openSidebar !== undefined && sb) sb.classList.toggle('bwm-emb-open', !!e.data.openSidebar);
     }
     // 主 iframe：☰ 工作区弹窗选择了会话 → 切换本 iframe 会话
-    if (e && e.data && e.data.type === 'bwm-switch-session' && !isPop) {
+    if (e.data && e.data.type === 'bwm-switch-session' && !isPop) {
       const items = [...document.querySelectorAll('[role=treeitem]')];
       const target = items.find((t) => String(t.innerText || '').split('\n')[0] === e.data.title);
       if (target) target.click();
@@ -876,7 +877,7 @@ function applyEmbeddedHarness(ctx) {
     document.addEventListener('click', (e) => {
       const item = e.target && e.target.closest ? e.target.closest('[role=treeitem]') : null;
       if (item && window.parent !== window) {
-        window.parent.postMessage({ type: 'bwm-pop-select', title: String(item.innerText || '').split('\n')[0] }, '*');
+        window.parent.postMessage({ type: 'bwm-pop-select', title: String(item.innerText || '').split('\n')[0] }, location.origin); // P0：targetOrigin 收紧同源
       }
     }, true);
   }
@@ -889,7 +890,7 @@ function applyEmbeddedHarness(ctx) {
     const sbEl = document.querySelector('[class*=sidebarCol]');
     if (sbEl && sbEl.classList.contains('bwm-emb-open')) {
       sbEl.classList.remove('bwm-emb-open');
-      if (window.parent !== window) window.parent.postMessage({ type: 'bwm-embedded', openSidebar: false }, '*');
+      if (window.parent !== window) window.parent.postMessage({ type: 'bwm-embedded', openSidebar: false }, location.origin); // P0：targetOrigin 收紧同源
     }
   }, true);
 
@@ -961,7 +962,8 @@ function apply(ctx) {
 
   // 陪伴页顶部"切换到干活"按钮 → 通知父页切回干活模式
   window.addEventListener('message', (e) => {
-    if (e && e.data && e.data.type === 'bwm-switch-mode' && e.data.mode === 'work') {
+    if (!e || e.origin !== location.origin) return; // P0 安全：仅接受同源消息
+    if (e.data && e.data.type === 'bwm-switch-mode' && e.data.mode === 'work') {
       setMode('work');
     }
   });
