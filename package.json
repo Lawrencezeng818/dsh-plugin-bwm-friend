@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-bwm-friend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "BWM Friend persona layer for DSH web: presence video background + dual-mode (companion/work) + host-file settings.",
   "type": "module",
   "main": "lib/index.js",
