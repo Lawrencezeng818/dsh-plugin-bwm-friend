@@ -17,6 +17,18 @@ try {
 }
 const { createRuntime } = runtimeCore;
 
+// 公开协议工具（memory 抽取/persona 预设）——发布后经包名解析；开发同仓 fallback
+let protocolMemory, protocolPersona;
+try {
+  protocolMemory = require('@laikaton/bwm-protocol/memory');
+  protocolPersona = require('@laikaton/bwm-protocol/persona');
+} catch {
+  protocolMemory = require('../../bwm-protocol/schema/memory.js');
+  protocolPersona = require('../../bwm-protocol/schema/persona.js');
+}
+const { extractFacts, mergeMemory, MEMORY_DEFAULTS } = protocolMemory;
+const { PERSONA_PRESETS } = protocolPersona;
+
 const REQUEST_CHANNELS = {
   start: 'conversation.request.start',
   reply: 'conversation.request.reply',
@@ -81,7 +93,7 @@ function createBwmRuntime(opts = {}) {
     },
   };
 
-  /* ── Persona API（P3 冻结）── */
+  /* ── Persona API（P3 冻结 + P2-P switch 落地）── */
   const persona = {
     // 当前人格（identity + personality 合并视图）
     get() {
@@ -90,11 +102,91 @@ function createBwmRuntime(opts = {}) {
         personality: context.get('personality') || {},
       };
     },
-    // 切换人格预设（v0.1：MIRA 唯一预设，switch 重置为默认——未来多预设/演进 Runtime 扩展）
-    switch(_id) {
-      // runtime 域只读保护下，人格切换由 Runtime 决策（未来：persona.switch 事件 + Evolution Runtime）
-      bus.emit('persona.switch', { id: _id });
+    // 可用人格预设列表
+    list() {
+      return Object.values(PERSONA_PRESETS).map((p) => ({ id: p.id, label: p.label }));
+    },
+    // 切换人格预设（P2-P 落地：校验存在 → 更新 runtime identity/personality 域 → 广播事件）
+    switch(id) {
+      const preset = PERSONA_PRESETS[id];
+      if (!preset) throw new Error(`unknown-persona: ${id}`);
+      context.set('identity', { ...preset.identity });
+      context.set('personality', { ...preset.personality });
+      bus.emit('persona.switch', { id });
       return persona.get();
+    },
+  };
+
+  /* ── Memory API（P2-M：FACT 抽取共享 protocol，写入 context.memory 域）── */
+  const memory = {
+    // 记住一条消息（抽取事实 + 最近话题；memory 域 persist → persistSnapshot 自动落盘）
+    remember(text) {
+      const cur = context.get('memory') || {};
+      const next = mergeMemory(cur, String(text));
+      context.set('memory', next);
+      bus.emit('memory.updated', { facts: extractFacts(String(text)) });
+      return next;
+    },
+    // 读取记忆
+    recall() {
+      return context.get('memory') || { ...MEMORY_DEFAULTS };
+    },
+    // 忘记某个事实
+    forget(fact) {
+      const cur = context.get('memory') || {};
+      const next = {
+        ...cur,
+        userFacts: (cur.userFacts || []).filter((f) => f !== fact),
+        updatedAt: new Date().toISOString(),
+      };
+      context.set('memory', next);
+      return next;
+    },
+  };
+
+  /* ── Voice API（P2-V：封装 host /tts + /transcribe，供多端复用）── */
+  let voiceAudio = null;
+  const voice = {
+    // 文本 → TTS 播放（复用单例 Audio；Node 环境无 Audio → 返回 false）
+    speak(text, { voice: voiceName = '冰糖' } = {}) {
+      return post('/bwm-friend/tts', { text, voice: voiceName })
+        .then((data) => {
+          if (!data || !data.ok || !data.audioBase64) return false;
+          if (typeof Audio === 'undefined') return false;
+          voiceAudio = voiceAudio || new Audio();
+          voiceAudio.src = 'data:audio/mp3;base64,' + data.audioBase64;
+          return voiceAudio.play().catch(() => false);
+        })
+        .catch(() => false);
+    },
+    // 录音 → ASR 文本；返回控制句柄（stop() 结束录音，onResult 回调文本）
+    listen(onResult) {
+      return new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          return reject(new Error('no-mic'));
+        }
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+          const mime = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+          const recorder = new MediaRecorder(stream, { mimeType: mime });
+          const chunks = [];
+          recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
+          recorder.onstop = () => {
+            stream.getTracks().forEach((t) => t.stop());
+            const blob = new Blob(chunks, { type: mime });
+            if (blob.size < 1000) return onResult && onResult({ ok: false, error: 'too-short' });
+            const reader = new FileReader();
+            reader.onload = () => {
+              const audioBase64 = String(reader.result).split(',')[1] || '';
+              post('/bwm-friend/transcribe', { audioBase64, format: mime.indexOf('webm') >= 0 ? 'webm' : 'mp4' })
+                .then((d) => onResult && onResult(d && d.ok ? { ok: true, text: d.text } : { ok: false, error: 'asr-failed' }))
+                .catch((e) => onResult && onResult({ ok: false, error: e.message || 'network' }));
+            };
+            reader.readAsDataURL(blob);
+          };
+          recorder.start();
+          resolve({ stop: () => recorder.stop(), cancel: () => { try { recorder.stop(); } catch { /* noop */ } stream.getTracks().forEach((t) => t.stop()); } });
+        }).catch((e) => reject(e));
+      });
     },
   };
 
@@ -114,6 +206,8 @@ function createBwmRuntime(opts = {}) {
     agent,
     persona,
     presence,
+    memory,
+    voice,
     // 底层透传（进阶使用/调试）
     events: { on: (c, fn, o) => bus.on(c, fn, o), emit: (c, p, m) => bus.emit(c, p, m) },
     context,

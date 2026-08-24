@@ -73,3 +73,28 @@ runtime.context.get(domain)            // 上下文只读
 - `runtime.ledger.query`（行为记录查询）
 - `runtime.capabilities.require(name, version)`（能力需求声明）
 - dsh-adapter 拆分（`@laikaton/bwm-adapter-dsh`：MutationObserver 等宿主观察逻辑从 Shell 迁出）
+
+---
+
+## v0.2 追加（2026-08-24，P2 Digital Human Agent）
+
+### Memory API（P2-M）
+| API | 签名 | 说明 |
+|-----|------|------|
+| `memory.remember` | `remember(text) → memory` | 记住一条消息（FACT 抽取 + 最近话题；memory 域 persist → 自动落盘） |
+| `memory.recall` | `recall() → {userFacts, recentTopics}` | 读取记忆 |
+| `memory.forget` | `forget(fact) → memory` | 忘记某个事实 |
+
+- 抽取逻辑单一来源：`@laikaton/bwm-protocol/memory`（host 与 SDK 共享）
+- 问句噪音过滤：尾词（吗/呢/么/？）+ 疑问词（怎么/什么/干嘛/为啥/如何）
+
+### Voice API（P2-V）
+| API | 签名 | 说明 |
+|-----|------|------|
+| `voice.speak` | `speak(text, {voice}) → Promise<boolean>` | 文本 → TTS 播放（复用单例 Audio） |
+| `voice.listen` | `listen(onResult) → Promise<{stop, cancel}>` | 录音 → ASR；stop() 结束，onResult({ok, text}) |
+
+### Persona.switch 落地（P2-P）
+- `persona.list()` → 预设列表（mira/mentor）
+- `persona.switch(id)` → 校验存在 → 更新 runtime identity/personality 域 → 广播 `persona.switch` 事件
+- 预设数据在 protocol（公开）；演进算法/关系规则在 runtime-core（闭源）

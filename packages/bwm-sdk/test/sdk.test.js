@@ -80,3 +80,69 @@ test('agent: send() 进行中重复 send → requestId 保持（状态机拒绝�
   assert.ok(r2.ok);
   assert.strictEqual(sdk.agent.status().state, 'idle');
 });
+
+/* ── P2：Memory / Voice / Persona.switch ── */
+test('memory: remember 抽取事实 + recall + forget', () => {
+  const sdk = createBwmRuntime();
+  const mem = sdk.memory.remember('我叫小明，我喜欢打篮球');
+  assert.ok(mem.userFacts.includes('小明'));
+  assert.ok(mem.userFacts.includes('打篮球'));
+  assert.strictEqual(sdk.memory.recall().userFacts.length, 2);
+  // 问句噪音不抽取
+  sdk.memory.remember('今天天气怎么样？');
+  assert.strictEqual(sdk.memory.recall().userFacts.length, 2, '问句不产生事实');
+  // forget
+  const after = sdk.memory.forget('小明');
+  assert.ok(!after.userFacts.includes('小明'));
+});
+
+test('memory: memory.updated 事件广播', () => {
+  const sdk = createBwmRuntime();
+  const got = [];
+  sdk.events.on('memory.updated', (p) => got.push(p));
+  sdk.memory.remember('我喜欢咖啡');
+  assert.strictEqual(got.length, 1);
+  assert.deepStrictEqual(got[0].facts, ['咖啡']);
+});
+
+test('persona: switch 更新 identity/personality + 事件广播 + list', () => {
+  const sdk = createBwmRuntime();
+  const got = [];
+  sdk.events.on('persona.switch', (p) => got.push(p.id));
+  assert.deepStrictEqual(sdk.persona.list(), [
+    { id: 'mira', label: 'Mira 陪伴' },
+    { id: 'mentor', label: 'Mentor 导师' },
+  ]);
+  const p = sdk.persona.switch('mentor');
+  assert.strictEqual(p.identity.name, 'Mentor');
+  assert.strictEqual(p.identity.tagline, 'think sharper, act bolder');
+  assert.strictEqual(p.personality.archetype, '理性导师型');
+  assert.deepStrictEqual(got, ['mentor']);
+  // 未知预设 → 抛错且不改当前
+  assert.throws(() => sdk.persona.switch('bogus'), /unknown-persona/);
+  assert.strictEqual(sdk.persona.get().identity.name, 'Mentor');
+  // 切回 mira
+  sdk.persona.switch('mira');
+  assert.strictEqual(sdk.persona.get().identity.name, 'Mira');
+});
+
+test('voice: speak 走 transport（Node 无 Audio → false 不抛）', async () => {
+  let posted = null;
+  const sdk = createBwmRuntime({
+    transport: async (path, body) => {
+      posted = { path, body };
+      return { ok: true, audioBase64: 'AAAA' };
+    },
+  });
+  const r = await sdk.voice.speak('你好', { voice: '茉莉' });
+  assert.strictEqual(r, false); // Node 环境无 Audio（真实浏览器返回 play Promise）
+  assert.strictEqual(posted.path, '/bwm-friend/tts');
+  assert.strictEqual(posted.body.text, '你好');
+  assert.strictEqual(posted.body.voice, '茉莉');
+});
+
+test('voice: listen 无麦克风环境 → reject no-mic', async () => {
+  const sdk = createBwmRuntime();
+  // Node 环境 navigator 未定义 → no-mic
+  await assert.rejects(() => sdk.voice.listen(() => {}), /no-mic/);
+});

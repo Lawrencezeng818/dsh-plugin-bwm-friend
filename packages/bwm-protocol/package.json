@@ -8,6 +8,7 @@
   "exports": {
     ".": "./schema/index.js",
     "./persona": "./schema/persona.js",
+    "./memory": "./schema/memory.js",
     "./schema/*": "./schema/*.json",
     "./package.json": "./package.json"
   },
