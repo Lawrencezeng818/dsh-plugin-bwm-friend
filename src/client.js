@@ -10,6 +10,9 @@
  * 注意：必须以 `return module.exports;` 结尾（build-client.mjs 信封要求）。
  */
 const React = require('react');
+// P1.1：Event Kernel 已迁入 @laikaton/bwm-runtime-core（闭源核心，独立包）
+// Shell 经 createRuntime() 协议面消费；require 由 build-client.mjs 内联注入解析
+const { createRuntime } = require('@laikaton/bwm-runtime-core');
 
 const SETTINGS_URL = '/bwm-friend/settings';
 const INVENTORY_URL = '/bwm-friend/inventory';
@@ -37,72 +40,11 @@ const EMBEDDED_SELECTORS = {
   stable: ['[data-slot="conversation.input.model"]', '[role=treeitem]', '[class*=sidebarCol]', '[class*=centerCol]', '[class*=detailsCol]'],
 };
 
-/* ── 1. Agent Event Kernel（v1.1：Router + Policy + Subscriber + 事件 version）── */
-// 事件 version 登记（Additive-only；载荷演进 bump，订阅方按 version 兼容解析）
-const EVENT_VERSIONS = {
-  'agent.thinking.start': '1.0',
-  'agent.thinking.end': '1.0',
-  'agent.tool.call': '1.0',
-  'agent.tool.result': '1.0',
-  'agent.task.success': '1.0',
-  'agent.task.failed': '1.0',
-  'memory.updated': '1.0',
-  'emotion.changed': '1.0',
-  'presence:state': '1.0',
-  'presence:mode': '1.0',
-};
-
-function createEventBus() {
-  const listeners = new Map(); // channel → Set<{fn, when}>
-  const history = [];
-  const routes = []; // Router 规则：[eventPattern, route(payload, meta) → {channels, blocked}]
-  return {
-    // Router：事件按 meta（mode/presence/user/silent）裁决目标通道
-    route(pattern, router) {
-      routes.push({ pattern, router });
-      return () => {
-        const i = routes.findIndex((r) => r.pattern === pattern && r.router === router);
-        if (i >= 0) routes.splice(i, 1);
-      };
-    },
-    // Subscriber：可带 when 谓词（Policy Engine）
-    on(channel, fn, opts = {}) {
-      const when = opts.when || (() => true);
-      if (!listeners.has(channel)) listeners.set(channel, new Set());
-      const entry = { fn, when };
-      listeners.get(channel).add(entry);
-      for (const ev of history) if (ev.channel === channel && when(ev.payload, ev.meta)) fn(ev.payload);
-      return () => listeners.get(channel)?.delete(entry);
-    },
-    emit(channel, payload = {}, meta = {}) {
-      // Router 裁决：可阻止或改道
-      let target = channel;
-      let blocked = false;
-      for (const { pattern, router } of routes) {
-        if (pattern === channel || (pattern instanceof RegExp && pattern.test(channel))) {
-          const r = router(payload, meta);
-          if (r && r.blocked) blocked = true;
-          if (r && r.channel) target = r.channel;
-        }
-      }
-      const ev = { channel, target, version: EVENT_VERSIONS[channel] || '1.0', payload, meta, at: new Date().toISOString() };
-      history.push(ev);
-      if (history.length > 500) history.shift();
-      if (blocked) return ev;
-      for (const entry of listeners.get(target) || []) {
-        try {
-          if (entry.when(payload, meta)) entry.fn(payload, meta);
-        } catch (e) {
-          console.error(`[bwm] event ${target} handler failed`, e);
-        }
-      }
-      return ev;
-    },
-    replay() {
-      for (const ev of history) for (const entry of listeners.get(ev.target) || []) entry.fn(ev.payload, ev.meta);
-    },
-  };
-}
+/* ── 1. Event Kernel（已迁入 @laikaton/bwm-runtime-core，P1.1）──────────────
+ * createEventBus / EVENT_VERSIONS 定义已移除——Shell 不再拥有核心；
+ * 经 require('@laikaton/bwm-runtime-core') 的 createRuntime() 协议面消费。
+ * 边界审计：grep "function createEventBus" src/client.js = 0 ✅
+ */
 
 /* ── 2. Shared Agent Context（8 域第一公民 + schemaVersion 演进）────── */
 const CONTEXT_SCHEMA_VERSION = '1.0';
@@ -995,10 +937,12 @@ function apply(ctx) {
   const { layer, video } = ensureLayer();
 
   // Phase 0：Event Kernel + Shared Agent Context（暴露给 DSH 接入适配器与调试）
-  const bus = createEventBus();
+  // P1.1：Event Kernel 经 Runtime 协议面（createRuntime）——Shell 不持有核心
+  const runtime = createRuntime();
+  const bus = runtime.bus;
   const context = createAgentContext();
   const adapter = resolveAdapter();
-  window.__bwm = { bus, context, adapter, registry: ADAPTER_REGISTRY, versions: EVENT_VERSIONS, embeddedSelectors: EMBEDDED_SELECTORS };
+  window.__bwm = { bus, context, adapter, registry: ADAPTER_REGISTRY, versions: runtime.versions, embeddedSelectors: EMBEDDED_SELECTORS };
   wireLedger(bus, context); // Agent Runtime MVP 闭环
 
   // R1：强制横屏（竖屏提示层 + 横屏锁定）

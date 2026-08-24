@@ -34,6 +34,15 @@ const id = pkg.name;
 const src = readFileSync(resolve(root, 'src', 'client.js'), 'utf8');
 const body = stripHeader(src).replace(/\r\n/g, '\n').replace(/\n+$/, '');
 
+// P1.1：内联注入 @laikaton/bwm-runtime-core（物理隔离 + 运行时自包含）
+// Shell 源码 `require('@laikaton/bwm-runtime-core')` → build 时解析为内联模块；
+// 未来 runtime 服务化/真依赖时，Shell 源码无需改动（__bwmRequire 换解析目标）。
+const runtimeSrc = readFileSync(resolve(root, 'packages', 'bwm-runtime-core', 'src', 'index.js'), 'utf8');
+const bodyWithRuntime = body.replaceAll(
+  "require('@laikaton/bwm-runtime-core')",
+  "__bwmRequire('@laikaton/bwm-runtime-core')"
+);
+
 const outline = [
   'window.__ModuleLoader__.load({',
   `\tid: ${JSON.stringify(id)},`,
@@ -41,11 +50,25 @@ const outline = [
   '\t\tvar module = { exports: {} };',
   '\t\tvar exports = module.exports;',
   '\t\tObject.defineProperty(exports, Symbol.toStringTag, { value: "Module" });',
+  // ── runtime-core 内联模块注册表（P1.1）──
+  "\t\tvar __bwmModules = {};",
+  "\t\t__bwmModules['@laikaton/bwm-runtime-core'] = (function() {",
+  '\t\t\tvar module = { exports: {} };',
+  '\t\t\tvar exports = module.exports;',
 ];
 
-// Indent the source body by two tabs. Preserve blank-line gaps; never indent
-// an already-blank line.
-const indented = body
+// runtime 源码按三 tab 缩进
+const runtimeIndented = runtimeSrc
+  .split('\n')
+  .map((line) => (line.trim() === '' ? '' : '\t\t\t' + line))
+  .join('\n');
+outline.push(runtimeIndented);
+outline.push('\t\t\treturn module.exports;');
+outline.push('\t\t})();');
+outline.push("\t\tvar __bwmRequire = function(name) { return __bwmModules[name] || require(name); };");
+
+// ── client body（require 已替换为 __bwmRequire）──
+const indented = bodyWithRuntime
   .split('\n')
   .map((line) => (line.trim() === '' ? '' : '\t\t' + line))
   .join('\n');

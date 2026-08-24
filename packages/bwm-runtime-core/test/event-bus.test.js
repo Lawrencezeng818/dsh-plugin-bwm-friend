@@ -1,0 +1,75 @@
+// Event Kernel 单测（node:test）——P1.1 搬移后验证核心不回归
+const { test } = require('node:test');
+const assert = require('node:assert');
+const { createEventBus, createRuntime, EVENT_VERSIONS } = require('../src/index.js');
+
+test('EVENT_VERSIONS 覆盖协议 10 事件（与 BWM-PROTOCOL-v1 一致）', () => {
+  assert.equal(Object.keys(EVENT_VERSIONS).length, 10);
+  assert.equal(EVENT_VERSIONS['agent.thinking.start'], '1.0');
+  assert.equal(EVENT_VERSIONS['presence:mode'], '1.0');
+});
+
+test('subscribe/emit 基础投递 + 版本字段', () => {
+  const bus = createEventBus();
+  const got = [];
+  bus.on('agent.thinking.start', (p) => got.push(p));
+  const ev = bus.emit('agent.thinking.start', { session: 's1' });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].session, 's1');
+  assert.equal(ev.version, '1.0');
+  assert.ok(ev.at);
+});
+
+test('on 回放历史（订阅在 emit 之后也收到）', () => {
+  const bus = createEventBus();
+  bus.emit('agent.tool.call', { tool: 'bash' });
+  const got = [];
+  bus.on('agent.tool.call', (p) => got.push(p));
+  assert.equal(got.length, 1);
+  assert.equal(got[0].tool, 'bash');
+});
+
+test('route 裁决：blocked 阻止投递', () => {
+  const bus = createEventBus();
+  bus.route('agent.task.failed', () => ({ blocked: true }));
+  const got = [];
+  bus.on('agent.task.failed', (p) => got.push(p));
+  bus.emit('agent.task.failed', { error: 'x' });
+  assert.equal(got.length, 0);
+});
+
+test('when 谓词过滤', () => {
+  const bus = createEventBus();
+  const got = [];
+  bus.on('presence:state', (p) => got.push(p), { when: (p) => p.state === 'thinking' });
+  bus.emit('presence:state', { state: 'idle' });
+  bus.emit('presence:state', { state: 'thinking' });
+  assert.deepEqual(got, [{ state: 'thinking' }]);
+});
+
+test('createRuntime 握手：hello → welcome full + 能力', () => {
+  const rt = createRuntime();
+  const welcome = rt.hello({ shellVersion: '0.3.0', dshVersion: '1.2.3', capabilities: ['video-layer'] });
+  assert.equal(welcome.protocol, 'bwm');
+  assert.equal(welcome.version, '1.0');
+  assert.equal(welcome.mode, 'full');
+  assert.ok(welcome.capabilities.includes('presence-provide'));
+  assert.ok(welcome.presence.includes('thinking'));
+});
+
+test('createRuntime subscribe/emit 协议面可用', () => {
+  const rt = createRuntime();
+  const got = [];
+  rt.subscribe('emotion.changed', (p) => got.push(p));
+  rt.emit('emotion.changed', { emotion: 'warm' });
+  assert.deepEqual(got, [{ emotion: 'warm' }]);
+});
+
+test('非法 presence fallback（协议 state.json 语义）', () => {
+  // 协议语义：非法值按 idle fallback——这里验证 runtime 不因非法输入抛错
+  const rt = createRuntime();
+  const got = [];
+  rt.subscribe('presence:state', (p) => got.push(p));
+  rt.emit('presence:state', { state: 'bogus' });
+  assert.equal(got[0].state, 'bogus'); // 传输层不拦截；决策层（P1.3 Presence Runtime）负责规范化
+});
