@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.0 (2026-08-24)
+
+### 架构（Runtime 化）
+- P1.1 Event Kernel 迁入 `@laikaton/bwm-runtime-core`（createEventBus + EVENT_VERSIONS + createRuntime 协议面）
+- P1.2 Context Runtime（8 域 + ownership 治理 + CONTEXT_VERSIONS + shellSet 校验）
+- P1.3 Capability Layer（negotiate 能力协商：requires/capabilities 分离、full/lite 降级）
+- P1.4 Runtime Contract（Shell 物理隔离：grep 红线全 0；Context/Ledger/Presence 状态机全部迁出；协议值域冻结）
+- Runtime v1.1 稳定化：DOMAIN_POLICY（Runtime State ≠ Persistent State）+ persistSnapshot 防抖 + requestState 状态机 + presence MutationObserver 事件驱动 + memory 串行化 + inventory 生命周期缓存 + iframe loading + Audio 复用
+- P3 SDK v0.1：`@laikaton/bwm-sdk`（Agent.send/cancel/status、Persona.get/switch、Presence.state/observe）
+
+### 功能
+- P2-Voice：MiMo ASR/TTS 代理（/bwm-friend/transcribe + /tts）+ 按住说话 → 自动发送 + 回复自动朗读 + 8 音色
+- P2-Memory/Persona：Identity Runtime 雏形（IDENTITY_PRESET 单一来源）+ Mira 记忆（FACT_PATTERNS 抽取/跨消息注入/问句噪音过滤）
+- 对话宽度对齐陪伴模式：iframe 742px（dialogue-panel 全宽）
+
+### 安全（代码审查）
+- CSRF 防护（Sec-Fetch-Site/Origin 同源校验，跨源 403）——防 RCE 级跨源 agent 触发
+- 静态资源 DoS（createReadStream error 崩进程）→ stat 预检 + stream error 监听
+- 路径穿越（serveCompanion resolve 校验）
+- media token 随机 UUID（防路径泄漏）
+- Range RFC 7233（suffix-range 正确 + start>end 416）
+- memory 原子写（temp+rename）+ 串行化
+- postMessage 发送 targetOrigin 收紧同源
+
+### 测试
+- runtime-core 32/32、host-endpoints 15/15、E2E 12/12、P2-VOICE、S3-PRESENCE
+
 ## 0.2.0 (2026-08-24)
 
 ### 修复
@@ -18,9 +45,3 @@
 - 任务信息条上移融合顶栏：DSH 会话 header 垂直两行(76px) → 横向单行紧凑条(44px)
 - ☰ 工作区弹窗：屏幕最右透明毛玻璃（right:0 + backdrop-blur），内嵌 iframe `/?bwm=embedded&pop=1` 仅侧栏会话树；点会话 → postMessage 三跳切换主 iframe + 自动关闭
 - 对话宽度：620 → 600px（用户指定）
-- P0 配置化：ASSET_ROOTS/BWM_STATIC/BWM_UI_PORT/DSH_WORK_DIR 环境变量优先
-- P1 版本化适配：EMBEDDED_SELECTORS 选择器版本登记表（DSH 升级对照）
-
-### 变更
-- 侧栏抽屉宽度：320 → 380 → 回退 320px（用户要求）
-- README.md 首次发布

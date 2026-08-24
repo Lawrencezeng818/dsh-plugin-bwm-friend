@@ -1,8 +1,13 @@
-# dsh-plugin-bwm-friend bundle patch (P0 skeleton)
+# dsh-plugin-bwm-friend bundle patch（Publish Preparation）
 #
-# 只做加法：insert 一个 host 行（bwm-friend → 本包名），
+# 只做加法：insert host 插件 + invariant companion。
 # client 半经 package.json 的 dsh.client manifest 由 host 自动扫描加载。
+# ⚠️ invariant 条目不声明 inject：invariants 是可选 service（宿主可能未加载），
+#    由 invariant.js 内 ctx.get('invariants') 安全读取——声明必需会 boot pending（实测）。
 - insert:
     - id: bwm-friend
       name: 'dsh-plugin-bwm-friend'
       inject: ['webServer']
+    - id: bwm-friend-invariant
+      name: 'dsh-plugin-bwm-friend/invariant'
+      disabled: false
