@@ -1,0 +1,17 @@
+{
+  "name": "@laikaton/bwm-protocol",
+  "version": "1.0.0",
+  "description": "BWM Protocol v1 — contract between @laikaton/dsh-bwm-friend (open shell) and @laikaton/bwm-runtime (closed core). Event/State/Capability/Handshake schemas.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "schema/index.js",
+  "exports": {
+    ".": "./schema/index.js",
+    "./schema/*": "./schema/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "schema/"
+  ],
+  "keywords": ["bwm", "protocol", "agent-identity", "presence", "context", "ledger"]
+}

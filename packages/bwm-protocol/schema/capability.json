@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/capability-v1.json",
+  "title": "BWM Capability Schema v1",
+  "description": "Capability negotiation between Shell and Runtime during handshake.",
+  "type": "object",
+  "definitions": {
+    "shellCapability": {
+      "type": "string",
+      "enum": ["video-layer", "composer-skin", "sidebar-drawer", "pop-session", "header-strip"]
+    },
+    "runtimeCapability": {
+      "type": "string",
+      "enum": ["presence-provide", "context-govern", "ledger-record", "identity-hold", "evolution-run"]
+    }
+  }
+}

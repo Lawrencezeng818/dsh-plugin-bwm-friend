@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/handshake-v1.json",
+  "title": "BWM Handshake Schema v1",
+  "description": "Shell<->Runtime handshake messages. Format public; negotiation strategy private.",
+  "definitions": {
+    "hello": {
+      "type": "object",
+      "required": ["protocol", "version", "shellVersion", "capabilities"],
+      "properties": {
+        "protocol": { "const": "bwm" },
+        "version": { "const": "1.0" },
+        "shellVersion": { "type": "string" },
+        "dshVersion": { "type": "string" },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "capability-v1.json#/definitions/shellCapability" }
+        }
+      }
+    },
+    "welcome": {
+      "type": "object",
+      "required": ["protocol", "version", "runtimeVersion", "mode", "capabilities"],
+      "properties": {
+        "protocol": { "const": "bwm" },
+        "version": { "const": "1.0" },
+        "runtimeVersion": { "type": "string" },
+        "mode": { "type": "string", "enum": ["full", "lite"] },
+        "presence": {
+          "type": "array",
+          "items": { "$ref": "state-v1.json#/definitions/presence" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "capability-v1.json#/definitions/runtimeCapability" }
+        }
+      }
+    }
+  }
+}

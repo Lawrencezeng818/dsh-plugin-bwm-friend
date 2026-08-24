@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/events-v1.json",
+  "title": "BWM Event Schema v1",
+  "description": "Agent activity events published by BWM Runtime, consumed by BWM Shell. Additive-only.",
+  "type": "object",
+  "required": ["type", "version"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "agent.thinking.start",
+        "agent.thinking.end",
+        "agent.tool.call",
+        "agent.tool.result",
+        "agent.task.success",
+        "agent.task.failed",
+        "memory.updated",
+        "emotion.changed",
+        "presence:state",
+        "presence:mode"
+      ]
+    },
+    "version": { "const": "1.0" },
+    "session": { "type": "string" },
+    "tool": { "type": "string" },
+    "ok": { "type": "boolean" },
+    "error": { "type": "string" },
+    "durationMs": { "type": "number" },
+    "scope": { "type": "string", "enum": ["agent", "relationship", "preference"] },
+    "emotion": { "$ref": "state-v1.json#/definitions/emotion" },
+    "state": { "$ref": "state-v1.json#/definitions/presence" },
+    "mode": { "$ref": "state-v1.json#/definitions/mode" },
+    "args": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "agent.tool.call" } } },
+      "then": { "required": ["tool"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.tool.result" } } },
+      "then": { "required": ["tool", "ok"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "presence:state" } } },
+      "then": { "required": ["state"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "presence:mode" } } },
+      "then": { "required": ["mode"] }
+    }
+  ]
+}

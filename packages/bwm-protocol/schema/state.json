@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/state-v1.json",
+  "title": "BWM State Schema v1",
+  "description": "State value domains. Enums are frozen; invalid values fall back (presence->idle, mode->work).",
+  "type": "object",
+  "definitions": {
+    "presence": {
+      "type": "string",
+      "enum": ["idle", "attention", "thinking", "executing", "speaking", "success", "error", "offline", "transition"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["work", "companion", "meeting"]
+    },
+    "emotion": {
+      "type": "string",
+      "enum": ["neutral", "warm", "curious", "focused", "concerned", "playful", "proud", "empathetic", "tired"]
+    }
+  }
+}
