@@ -1,6 +1,6 @@
 {
   "name": "@laikaton/bwm-skin-mira",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "BWM Friend 默认数字人皮肤资产包（甜心女孩主题）：idle 待机 + heygem 说话视频。安装后插件自动发现 node_modules/@laikaton/bwm-skin-*/assets。",
   "license": "UNLICENSED",
   "files": [
