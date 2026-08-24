@@ -124,3 +124,21 @@ test('lite: 直接 negotiate 缺能力 → lite mode（纯函数验证）', () =
   assert.strictEqual(r.mode, 'lite');
   assert.strictEqual(r.missing[0].name, 'missing-cap');
 });
+
+/* ── P2-Persona：Identity Runtime 雏形测试 ── */
+test('identity: createRuntime 初始化 identity/personality 域（我是谁）', () => {
+  const runtime = createRuntime();
+  const identity = runtime.context.get('identity');
+  const personality = runtime.context.get('personality');
+  assert.strictEqual(identity.name, 'Mira');
+  assert.strictEqual(identity.tagline, 'be water my friend');
+  assert.ok(Array.isArray(identity.coreValues) && identity.coreValues.length >= 3);
+  assert.strictEqual(personality.archetype, '温暖陪伴型');
+  assert.ok(Array.isArray(personality.traits) && personality.traits.includes('共情'));
+});
+
+test('identity: Shell 不能篡改 identity 域（runtime 域只读）', () => {
+  const runtime = createRuntime();
+  assert.throws(() => runtime.context.shellSet('identity', { name: 'Hacked' }), /CONTEXT_PERMISSION_DENIED/);
+  assert.strictEqual(runtime.context.get('identity').name, 'Mira');
+});
