@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/settings-v1.json",
+  "title": "BWM Settings Schema v1",
+  "description": "三端（桌面 App / DSH 插件 / 手机）设置字段统一规范。Additive-only：新增 = minor；修改/删除 = major。",
+  "type": "object",
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "account": {
+      "type": "object",
+      "description": "账号（token 不落盘，不进入 schema）",
+      "properties": {
+        "subject": { "type": "string" },
+        "loggedIn": { "type": "boolean" }
+      }
+    },
+    "avatar": {
+      "type": "object",
+      "description": "数字人形象",
+      "properties": {
+        "theme": { "type": "string", "minLength": 1 },
+        "idle": { "type": ["string", "null"] },
+        "persona": { "type": "string" },
+        "driver": { "type": "string", "enum": ["video", "image"] }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "description": "语音",
+      "properties": {
+        "voice": { "type": "string" },
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "description": "语言模型",
+      "properties": {
+        "provider": { "type": "string", "enum": ["local", "external"] },
+        "baseUrl": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "description": "界面",
+      "properties": {
+        "mode": { "type": "string", "enum": ["work", "companion", "meeting"] },
+        "type": { "type": "string", "enum": ["stage", "panel"] },
+        "chatWidth": { "type": "number", "minimum": 320, "maximum": 1200 }
+      }
+    },
+    "power": {
+      "type": "object",
+      "description": "电源/性能",
+      "properties": {
+        "pauseOnBlur": { "type": "boolean" },
+        "pauseOnBattery": { "type": "boolean" }
+      }
+    }
+  },
+  "required": ["version"]
+}
