@@ -142,3 +142,40 @@ test('identity: Shell 不能篡改 identity 域（runtime 域只读）', () => {
   assert.throws(() => runtime.context.shellSet('identity', { name: 'Hacked' }), /CONTEXT_PERMISSION_DENIED/);
   assert.strictEqual(runtime.context.get('identity').name, 'Mira');
 });
+
+/* ── Runtime v1.1：DOMAIN_POLICY（运行态不落盘）+ Request 状态机 ── */
+test('persist: persistSnapshot 只含 persist 域（运行态 presence/timeline 不落盘）', () => {
+  const runtime = createRuntime();
+  // 制造运行态
+  runtime.emit('agent.thinking.start');
+  runtime.emit('agent.tool.call', { tool: 'bash' });
+  const snap = runtime.persistSnapshot();
+  assert.ok(snap.identity && snap.identity.name === 'Mira');
+  assert.ok(snap.personality);
+  assert.ok('presence' in snap === false, 'presence 运行态不得落盘');
+  assert.ok('timeline' in snap === false, 'timeline 事件流不得落盘');
+  assert.ok('tasks' in snap === false, 'tasks 瞬态不得落盘');
+  assert.ok('capability' in snap === false, 'capability 动态不得落盘');
+  assert.strictEqual(snap.schemaVersion, '1.0');
+});
+
+test('request: start → thinking，重复 start 拒绝（防重复提交）', () => {
+  const runtime = createRuntime();
+  runtime.emit('conversation.request.start', { requestId: 'r1' });
+  assert.strictEqual(runtime.context.get('conversation').requestState.state, 'thinking');
+  assert.strictEqual(runtime.context.get('conversation').requestState.requestId, 'r1');
+  // 重复 start（快速连点）→ 拒绝
+  runtime.emit('conversation.request.start', { requestId: 'r2' });
+  assert.strictEqual(runtime.context.get('conversation').requestState.requestId, 'r1', '重复请求被拒绝');
+});
+
+test('request: reply → replying；end → idle（完整生命周期）', () => {
+  const runtime = createRuntime();
+  runtime.emit('conversation.request.start', { requestId: 'r3' });
+  runtime.emit('conversation.request.reply');
+  assert.strictEqual(runtime.context.get('conversation').requestState.state, 'replying');
+  runtime.emit('conversation.request.end');
+  const rs = runtime.context.get('conversation').requestState;
+  assert.strictEqual(rs.state, 'idle');
+  assert.strictEqual(rs.requestId, null);
+});

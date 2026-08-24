@@ -138,6 +138,15 @@ function ensureLayer() {
   video.playsInline = true;
   video.preload = 'auto';
   video.style.cssText = 'position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;';
+  // S7：视频加载失败降级（断网/404 → 品牌渐变占位，不黑屏）
+  video.addEventListener('error', () => {
+    layer.style.background = 'radial-gradient(1200px 800px at 75% 40%, rgba(91,124,255,.22), rgba(8,13,22,.94))';
+    const fallback = document.createElement('div');
+    fallback.id = 'bwm-video-fallback';
+    fallback.textContent = '✨ Mira 暂时离线，稍后回来';
+    fallback.style.cssText = 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:rgba(189,198,195,.55); font-size:14px; letter-spacing:.06em;';
+    if (!layer.querySelector('#bwm-video-fallback')) layer.appendChild(fallback);
+  });
   layer.appendChild(video);
   document.body.insertBefore(layer, document.body.firstChild);
   // bwm 幕布（左 58vw 浮层：虚化+压暗，独立于 DSH 卡片，精确复刻 bwm ::before）
@@ -797,7 +806,7 @@ function applyEmbeddedHarness(ctx) {
   expandSidebar();
 
   // P2-8 presence 联动：监听对话流活动（Think/工具调用）→ 通知父页数字人视频状态
-  // 纯结构检测（[class*=message] 文本），不触碰原生事件系统；轮询简单可靠。
+  // Runtime v1.1：MutationObserver 事件驱动替代每秒轮询——只在 DOM 变化时判定（删 setInterval）
   if (!isPop) {
     let presenceCurrent = 'idle';
     const sendPresence = (state) => {
@@ -805,26 +814,28 @@ function applyEmbeddedHarness(ctx) {
       presenceCurrent = state;
       if (window.parent !== window) window.parent.postMessage({ type: 'bwm-presence', state }, location.origin);
     };
-    const checkPresence = () => {
+    const judgePresence = () => {
       // 运行信号（原生）：composer 发送键在任务运行时变为 Stop（InputBar primaryStops）
       // ——比检测对话流 Think 块可靠：历史 Think 块会让空闲态误判 thinking（用户实测 bug）
       const primary = document.querySelector('.p7GS4W_primary');
-      const running = primary && !primary.disabled && /stop|停止/i.test((primary.getAttribute('aria-label') || '') + (primary.innerText || ''));
+      const running = primary && !primary.disabled && /stop|停止/i.test((primary.getAttribute('aria-label') || '') + (primary.textContent || ''));
       if (!running) {
         sendPresence('idle');
         return;
       }
-      // 运行中：区分 thinking（纯思考）vs executing（正在调工具）——只看最近 20 个节点
+      // 运行中：区分 thinking vs executing——只看最近 20 个 tool 节点（textContent 不触发 reflow）
       let executing = false;
-      const nodes = document.querySelectorAll('[class*=bubble], [class*=row], [class*=tool], [class*=block]');
+      const nodes = document.querySelectorAll('[class*=tool]');
       for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 20); i--) {
-        const t = String(nodes[i].innerText || '');
-        if (t.length > 800) continue; // 跳过正文块
-        if (/调用工具|tool\/call|Tool call|工具/.test(t) && t.length < 200) { executing = true; break; }
+        const t = String(nodes[i].textContent || '');
+        if (t.length < 200 && /调用工具|tool\/call|Tool call|工具/.test(t)) { executing = true; break; }
       }
       sendPresence(executing ? 'executing' : 'thinking');
     };
-    setInterval(checkPresence, 1000);
+    // 事件驱动：primary 按钮 aria-label/disabled 变化（Stop↔Send）+ 对话区新节点（工具行/回复）
+    const mo = new MutationObserver(() => judgePresence());
+    mo.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-label', 'disabled'] });
+    judgePresence(); // 初始态
   }
 
   // （用量圆环定位暂时撤掉：JS transform 会在模型按钮上方叠覆盖层、拦截点击/把模型菜单弄坏。
@@ -909,10 +920,15 @@ function apply(ctx) {
     }
   });
 
-  // Context 持久化（随配置落盘；preferences/identity/memory 域）
+  // Context 持久化（Runtime v1.1：决策在 Runtime——persistSnapshot 只含 persist 域，
+  // 运行态 presence/timeline 不落盘；1.5s 防抖避免任务中高频写盘）
+  let persistTimer = null;
   const persistContext = () => {
-    const snapshot = context.toJSON();
-    loadSettings().then((cfg) => saveSettings({ ...cfg, context: snapshot }));
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      const snapshot = runtime.persistSnapshot();
+      loadSettings().then((cfg) => saveSettings({ ...cfg, context: snapshot }));
+    }, 1500);
   };
   context.watch(() => persistContext());
 

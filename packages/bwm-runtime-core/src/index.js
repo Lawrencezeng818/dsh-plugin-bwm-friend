@@ -138,6 +138,26 @@ function negotiate(requires = [], runtimeCaps = RUNTIME_CAPABILITIES) {
   };
 }
 
+/* ── 持久化策略（Runtime v1.1：Runtime State ≠ Persistent State）──
+ * 第一条设计原则：高频运行态（presence/ledger/timeline/task）不落盘；
+ * 只有静态/配置/长期记忆（identity/personality/memory/preferences/conversation）持久化。
+ * 决策在 Runtime（persistSnapshot），Shell 只调用，不自行判断哪些域落盘。
+ */
+const DOMAIN_POLICY = Object.freeze({
+  identity: 'persist',      // 静态：我是谁
+  personality: 'persist',   // 配置：人格特征
+  memory: 'persist',        // 长期：用户记忆
+  preferences: 'persist',   // 配置：用户偏好
+  conversation: 'persist',  // 历史：会话数据（可选，暂落盘）
+  presence: 'runtime',      // 运行态：presence 状态（高频，不落盘）
+  timeline: 'runtime',      // 事件流：行为生命周期（可重放，不落盘）
+  tasks: 'runtime',         // 瞬态：任务状态
+  capability: 'runtime',    // 动态：能力协商结果
+});
+const PERSIST_DOMAINS = Object.entries(DOMAIN_POLICY)
+  .filter(([, p]) => p === 'persist')
+  .map(([d]) => d);
+
 /* ── Context Runtime（P1.2/P1.4：8 域共享上下文 + ownership 治理 + 版本迁移）──
  * 从 src/client.js 原样搬移（2026-08-24 P1.4）——自此 Context 归 Runtime，Shell 只读/订阅。
  * ownership 模型 v1（docs/BWM-CONTEXT-CONTRACT-v1.md）：
@@ -314,6 +334,30 @@ const PERSONALITY_PRESET = {
   memoryStyle: '记得用户说过的重要事情（偏好/人物/经历）',
 };
 
+/* ── Request 状态机（Runtime v1.1：conversation.requestState）──
+ * Shell 发送请求 → thinking →（replying）→ idle；防重复提交/多端统一。
+ * 状态机在 Runtime（协议层）；Shell 只发事件 + 读状态渲染。
+ */
+const REQUEST_STATES = ['idle', 'thinking', 'replying'];
+function createRequestMachine(bus, context) {
+  const current = () => ((context.get('conversation') || {}).requestState) || { state: 'idle', requestId: null, startedAt: null };
+  const apply = (state, patch = {}) => {
+    context.set('conversation', {
+      ...(context.get('conversation') || {}),
+      requestState: { ...current(), ...patch, state },
+    });
+  };
+  const off = [
+    bus.on('conversation.request.start', (p) => {
+      if (current().state !== 'idle') return; // 已有请求进行中 → 拒绝重复
+      apply('thinking', { requestId: (p && p.requestId) || null, startedAt: new Date().toISOString() });
+    }),
+    bus.on('conversation.request.reply', () => apply('replying')),
+    bus.on('conversation.request.end', () => apply('idle', { requestId: null, startedAt: null })),
+  ];
+  return () => off.forEach((d) => d());
+}
+
 /* ── Runtime 协议面（BWM Protocol v1：hello/welcome + subscribe/emit）── */
 function createRuntime() {
   const bus = createEventBus();
@@ -322,6 +366,7 @@ function createRuntime() {
   context.set('personality', { ...PERSONALITY_PRESET });     // 人格特征
   wireLedger(bus, context);           // Ledger Runtime（事件 → timeline/tasks）
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
+  createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
   let handshake = null;
   return {
     protocol: 'bwm',
@@ -329,6 +374,13 @@ function createRuntime() {
     bus,       // 事件总线（Shell 订阅渲染）
     context,   // 共享上下文（Shell 只读 runtime 域；shellSet 写 shared 域）
     hydrateContext(raw) { context.hydrate(raw); }, // 快照恢复（runtime 内部，绕过 ownership）
+    // Runtime v1.1：持久化快照（只含 persist 域——运行态不落盘，决策在 Runtime）
+    persistSnapshot() {
+      const all = context.toJSON();
+      const snap = { schemaVersion: all.schemaVersion };
+      for (const d of PERSIST_DOMAINS) if (all[d] !== undefined) snap[d] = all[d];
+      return snap;
+    },
     // Shell → Runtime 握手（格式公开，策略私有——协商结果由 negotiate 计算）
     // capabilities：shell 自身提供的能力（信息性，供 runtime 了解宿主）；requires：shell 需要 runtime 提供的核心能力（决定 full/lite）
     hello({ shellVersion = '0.0.0', dshVersion = 'unknown', capabilities = [], requires = [] } = {}) {
@@ -361,10 +413,14 @@ module.exports = {
   createRuntime,
   createAgentContext,
   createPresenceMachine,
+  createRequestMachine,
   wireLedger,
   EVENT_VERSIONS,
   CONTEXT_VERSIONS,
   CONTEXT_ERRORS,
+  DOMAIN_POLICY,
+  PERSIST_DOMAINS,
+  REQUEST_STATES,
   validMode,
   validPresence,
   MODES,
