@@ -64,78 +64,11 @@ const SHELL_REQUIRES = [
  * 边界审计：grep "function createEventBus" src/client.js = 0 ✅
  */
 
-/* ── 2. Shared Agent Context（8 域第一公民 + schemaVersion 演进）────── */
-const CONTEXT_SCHEMA_VERSION = '1.0';
-// ContextMigrationManager：版本链迁移（Additive-only，幂等可重放）
-const CONTEXT_MIGRATIONS = {
-  // '0.9': (ctx) => { ... }  未来版本迁移在此登记
-};
-
-function createAgentContext() {
-  const domains = {
-    identity: {},
-    personality: {},
-    memory: {},
-    conversation: {},
-    tasks: {},
-    preferences: {},
-    timeline: [],
-    presence: { state: 'idle' },
-    capability: { available: [], dynamic: true },
-  };
-  const watchers = new Set();
-  let schemaVersion = CONTEXT_SCHEMA_VERSION;
-  const migrate = (from) => {
-    // 沿版本链顺序执行迁移（当前无历史版本，链为空；框架就位）
-    let v = from;
-    while (v && v !== CONTEXT_SCHEMA_VERSION) {
-      const step = CONTEXT_MIGRATIONS[v];
-      if (!step) break; // 未知旧版本 → 保留原数据，标记
-      step(domains);
-      v = nextVersion(v);
-    }
-    schemaVersion = CONTEXT_SCHEMA_VERSION;
-  };
-  return {
-    schemaVersion() {
-      return schemaVersion;
-    },
-    get(domain) {
-      return domain === undefined ? { schemaVersion, ...domains } : domains[domain];
-    },
-    set(domain, value) {
-      if (!(domain in domains)) throw new Error(`unknown context domain: ${domain}`);
-      domains[domain] = value;
-      for (const fn of watchers) fn(domain, value);
-    },
-    patch(domain, partial) {
-      this.set(domain, { ...domains[domain], ...partial });
-    },
-    watch(fn) {
-      watchers.add(fn);
-      return () => watchers.delete(fn);
-    },
-    toJSON() {
-      return { schemaVersion, ...JSON.parse(JSON.stringify(domains)) };
-    },
-    hydrate(raw) {
-      if (raw && typeof raw === 'object') {
-        if (raw.schemaVersion && raw.schemaVersion !== CONTEXT_SCHEMA_VERSION) {
-          migrate(raw.schemaVersion); // 旧版本 → 迁移链
-        }
-        for (const k of Object.keys(domains)) {
-          if (raw[k] !== undefined) domains[k] = raw[k];
-        }
-      }
-    },
-  };
-}
-
-// 版本链推进（当前仅 1.0，框架为未来版本就位）
-function nextVersion(v) {
-  const chain = { '0.9': '1.0' };
-  return chain[v] || CONTEXT_SCHEMA_VERSION;
-}
+/* ── 2. Shared Agent Context（已迁入 @laikaton/bwm-runtime-core，P1.4）────────────
+ * createAgentContext / CONTEXT_VERSIONS / CONTEXT_MIGRATIONS 定义已移除——Context 归 Runtime；
+ * Shell 经 runtime.context（只读 runtime 域 / shellSet 写 shared 域）+ runtime.hydrateContext 消费。
+ * 边界审计：grep "function createAgentContext" src/client.js = 0 ✅
+ */
 
 /* ── 3. Presence 视觉联动 ───────────────────────────────────────────── */
 // 状态 → 视觉配方（CSS 变体类，视频层不重建播放器）
@@ -217,41 +150,21 @@ function ensureLayer() {
   return { layer, video };
 }
 
-// 事件 → presence 状态映射（单写者：只有这里能改 presence 视觉）
-function wirePresence(bus, context, layer) {
-  // 幂等应用状态（不发事件，供外部帧与内部使用）
-  const applyState = (state, transient) => {
-    context.set('presence', { ...context.get('presence'), state, at: new Date().toISOString() });
+// Presence 渲染层（P1.4：状态机已迁入 runtime-core createPresenceMachine，Shell 只订阅渲染）
+// 订阅 bus 'presence:state' → 应用视觉 class（PRESENCE_CLASS 配方）；不持有状态决策
+function subscribePresenceRender(bus, layer) {
+  const applyClass = (state) => {
+    if (!layer) return;
     layer.setAttribute('data-bwm-presence', state);
     for (const name of Object.values(PRESENCE_CLASS)) {
       if (name) layer.classList.remove(name); // 空名（idle）跳过，classList.remove('') 会抛
     }
     const cls = PRESENCE_CLASS[state];
     if (cls) layer.classList.add(cls);
-    if (transient > 0) {
-      setTimeout(() => {
-        if (layer.getAttribute('data-bwm-presence') === state) applyState('idle', 0);
-      }, transient);
-    }
   };
-  // 状态机入口：幂等 + 变更才发事件（防自回发死循环）
-  const setPresence = (state, { transient = 0 } = {}) => {
-    if (layer.getAttribute('data-bwm-presence') === state) return;
-    applyState(state, transient);
-    bus.emit('presence:state', { state });
-  };
-  const off = [
-    bus.on('agent.thinking.start', () => setPresence('thinking')),
-    bus.on('agent.thinking.end', () => setPresence('idle')),
-    bus.on('agent.tool.call', () => setPresence('executing')),
-    bus.on('agent.tool.result', () => setPresence('thinking')),
-    bus.on('agent.task.success', () => setPresence('success', { transient: 1400 })),
-    bus.on('agent.task.failed', () => setPresence('error', { transient: 2000 })),
-    // 外部 presence:state 帧：直接应用，不再回发（防循环）
-    bus.on('presence:state', (p) => { if (p && p.state) applyState(p.state, 0); }),
-  ];
-  applyState('idle', 0); // 初始态
-  return () => off.forEach((d) => d());
+  const off = bus.on('presence:state', (p) => { if (p && p.state) applyClass(p.state); });
+  applyClass('idle'); // 初始态
+  return off;
 }
 
 /* ── 4. 既有 M1 功能 ────────────────────────────────────────────────── */
@@ -315,21 +228,10 @@ function bindOcclusionPause(video) {
   });
 }
 
-/* ── 4.5 Ledger 闭环（Agent Runtime MVP：Event→Context→Ledger）───── */
-// Agent 经历（timeline）与任务状态（tasks）由事件驱动更新；timeline 即 P6 读模型
-function wireLedger(bus, context) {
-  const record = (actionType, detail) => {
-    const timeline = Array.isArray(context.get('timeline')) ? context.get('timeline') : [];
-    timeline.push({ action_type: actionType, outcome: detail.outcome || 'success', summary: detail.summary || '', at: new Date().toISOString() });
-    context.set('timeline', timeline.slice(-200)); // 上限 200 条
-  };
-  const off = [
-    bus.on('agent.task.success', (p) => { context.set('tasks', { last: 'success', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { outcome: 'success', summary: p && p.summary }); }),
-    bus.on('agent.task.failed', (p) => { context.set('tasks', { last: 'failed', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { outcome: 'failed', summary: p && p.summary }); }),
-    bus.on('agent.tool.call', (p) => record('tool_execution', { outcome: 'started', summary: p && p.tool })),
-  ];
-  return () => off.forEach((d) => d());
-}
+/* ── 4.5 Ledger 闭环（已迁入 @laikaton/bwm-runtime-core，P1.4）────────────
+ * wireLedger 定义已移除——Ledger 归 Runtime（createRuntime 内部接线：事件 → timeline/tasks）。
+ * 边界审计：grep "function wireLedger" src/client.js = 0 ✅
+ */
 
 /* ── 5. DSH Adapter Registry（六/七轮评审：版本化适配器）────────────── */
 // DSH 前端类名全 hashed（CSS Modules），唯一稳定锚点 = textarea（对话输入框）。
@@ -486,15 +388,8 @@ function bindPowerManagement(video, getPowerCfg) {
   }
 }
 
-/* ── 7. Mode / PresenceState / EmotionState 拆分（协议 P2 v3）──────── */
-const MODES = new Set(['companion', 'work', 'meeting']); // 视图（决定布局）
-const PRESENCE_STATES = new Set(['idle', 'attention', 'thinking', 'executing', 'speaking', 'success', 'error', 'offline', 'transition']); // 存在
-function validMode(m) {
-  return MODES.has(m) ? m : 'work';
-}
-function validPresence(s) {
-  return PRESENCE_STATES.has(s) ? s : 'idle';
-}
+/* ── 7. Mode / PresenceState 拆分（协议 P2 v3；值域已迁 runtime-core P1.4）──────── */
+const { validMode, validPresence } = require('@laikaton/bwm-runtime-core');
 
 /* ── 7.5 强制横屏（通用布局：任何屏幕一律横屏，竖屏显示提示层）────────── */
 function wireForceLandscape() {
@@ -971,12 +866,11 @@ function apply(ctx) {
   }
   const { layer, video } = ensureLayer();
 
-  // Phase 0：Event Kernel + Shared Agent Context（暴露给 DSH 接入适配器与调试）
-  // P1.1：Event Kernel 经 Runtime 协议面（createRuntime）——Shell 不持有核心
-  // P1.3：Capability Layer——hello 握手协商（capabilities 提供声明 + requires 需求声明 → negotiation）
+  // Phase 0：Runtime 协议面（P1.1-1.4：Event Kernel/Context/Ledger/Presence 状态机全部在 runtime-core）
+  // P1.4：Shell 只持有 bus（订阅）+ context（只读）+ hydrateContext（恢复）——不持有任何核心状态机
   const runtime = createRuntime();
   const bus = runtime.bus;
-  const context = createAgentContext();
+  const context = runtime.context;
   const adapter = resolveAdapter();
   let dshVersion = 'unknown';
   try { dshVersion = (typeof window !== 'undefined' && window.__DSH_VERSION__) || 'embedded'; } catch (_) { /* noop */ }
@@ -987,7 +881,7 @@ function apply(ctx) {
     requires: SHELL_REQUIRES,
   });
   window.__bwm = { bus, context, adapter, registry: ADAPTER_REGISTRY, versions: runtime.versions, embeddedSelectors: EMBEDDED_SELECTORS, negotiation: welcome.negotiation, mode: welcome.mode, shell: { capabilities: SHELL_CAPABILITIES, requires: SHELL_REQUIRES } };
-  wireLedger(bus, context); // Agent Runtime MVP 闭环
+  // Ledger/Presence 状态机由 runtime 内部接线（wireLedger + createPresenceMachine）——Shell 不再调用
 
   // R1：强制横屏（竖屏提示层 + 横屏锁定）
   wireForceLandscape();
@@ -1024,12 +918,12 @@ function apply(ctx) {
 
   // 恢复持久化 Context
   loadSettings().then((cfg) => {
-    if (cfg.context) context.hydrate(cfg.context);
+    if (cfg.context) runtime.hydrateContext(cfg.context);
     bus.replay();
   });
 
-  // Presence 视觉联动（事件 → 状态 → 视觉配方）
-  wirePresence(bus, context, layer);
+  // Presence 视觉联动（P1.4：订阅渲染，状态机在 runtime）
+  subscribePresenceRender(bus, layer);
 
   // VideoEngine 电源管理（可见性 + 电池感知；配置取启动快照避免异步竞态）
   let activeCfg = { power: {} };

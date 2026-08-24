@@ -67,9 +67,12 @@ test('createRuntime subscribe/emit 协议面可用', () => {
 
 test('非法 presence fallback（协议 state.json 语义）', () => {
   // 协议语义：非法值按 idle fallback——这里验证 runtime 不因非法输入抛错
+  // P1.4 变化：createRuntime 内部 Presence 状态机启动时 emit 初始 idle；bus.on 回放 history
+  // → 订阅者立即收到当前状态（{state:'idle'}），随后 emit 的 bogus 原样透传（决策层负责规范化）
   const rt = createRuntime();
   const got = [];
   rt.subscribe('presence:state', (p) => got.push(p));
+  assert.equal(got[0].state, 'idle'); // 回放初始态（P1.4：Shell 订阅即知当前状态）
   rt.emit('presence:state', { state: 'bogus' });
-  assert.equal(got[0].state, 'bogus'); // 传输层不拦截；决策层（P1.3 Presence Runtime）负责规范化
+  assert.equal(got[got.length - 1].state, 'bogus'); // 传输层不拦截；决策层（Presence Runtime）负责规范化
 });
