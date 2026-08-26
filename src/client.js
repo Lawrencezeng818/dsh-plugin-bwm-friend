@@ -671,7 +671,7 @@ html, body, #root, #root > div, [class*=frame], [class*=centerCol], [class*=cent
 [class*=centerCol] header [class*=headerUtilities] { margin-left: 4px !important; }
 [class*=centerCol] header [class*=tabs] { margin-left: auto !important; flex: none !important; align-items: center !important; gap: 2px !important; height: 100% !important; }
 [class*=centerCol] header [class*=tab] { height: 28px !important; line-height: 28px !important; font-size: 12px !important; }
-[class*=scrollBody] { flex: 1 1 auto !important; min-height: 0 !important; overflow-y: auto !important; display: flex !important; flex-direction: column !important; justify-content: flex-end !important; }
+[class*=scrollBody] { flex: 1 1 auto !important; min-height: 0 !important; overflow-y: auto !important; display: flex !important; flex-direction: column !important; justify-content: flex-start !important; }
 /* 会话区：参照原生——不显示滚动条，但鼠标滚轮能上下滚（历史可翻）
    ⚠️ 不能用 [class*=root] 宽泛选择——它命中 PNUCKq_root（模型按钮容器）/ContextMeter root 等
    组件容器，overflow auto 会把弹出的模型菜单/用量面板裁剪掉（用户实测点击无弹框）。
@@ -785,6 +785,44 @@ function applyEmbeddedHarness(ctx) {
       if (window.parent !== window) window.parent.postMessage({ type: 'bwm-embedded', openSidebar: false }, location.origin); // P0：targetOrigin 收紧同源
     }
   }, true);
+
+  // 2026-08-25 fix：对话区自动滚动（用户输入/回复后立即滚到最新消息）。
+  // 监听 scrollBody 内容变化（MutationObserver 事件驱动，替代轮询），
+  // 新消息节点加入后 scrollTop = scrollHeight 滚到底部。幂等：重复调用自动去重。
+  (function wireAutoScroll() {
+    if (isPop || window.__bwmAutoScrollWired) return;
+    window.__bwmAutoScrollWired = true;
+    let sc = null;
+    const scrollToBottom = () => {
+      if (sc) sc.scrollTop = sc.scrollHeight;
+    };
+    const findScrollBody = () => {
+      if (sc) return true;
+      const el = document.querySelector('[class*=scrollBody]');
+      if (el) { sc = el; return true; }
+      return false;
+    };
+    // 延迟查询：DSH 会话视图异步渲染，scrollBody 可能晚出现
+    let tries = 0;
+    const poll = () => {
+      if (findScrollBody()) {
+        sc.addEventListener('scroll', () => {
+          // 用户主动上翻时暂停自动滚（避免抢滚动）；接近底部时恢复
+          const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 60;
+          window.__bwmAutoScrollPaused = !nearBottom;
+        }, { passive: true });
+        const mo = new MutationObserver(() => {
+          if (window.__bwmAutoScrollPaused) return;
+          scrollToBottom();
+        });
+        mo.observe(sc, { childList: true, subtree: true, characterData: true });
+        scrollToBottom();
+      } else if (++tries < 40) {
+        setTimeout(poll, 500);
+      }
+    };
+    poll();
+  })();
 
   // 窄屏自动折叠问题：iframe 620 < SIDEBAR_AUTO_COLLAPSE(1024) → DSH 原生把侧栏置为
   // collapsed（React 条件渲染，会话树 treeitem 根本不出现在 DOM，CSS 无法补救）。
