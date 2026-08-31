@@ -758,18 +758,57 @@ function applyEmbeddedHarness(ctx) {
       if (e.data.openSidebar !== undefined && sb) sb.classList.toggle('bwm-emb-open', !!e.data.openSidebar);
     }
     // 主 iframe：☰ 工作区弹窗选择了会话 → 切换本 iframe 会话
+    // 目标会话可能折叠在未展开的文件夹里 → 先沿 folders 链逐层展开（等 React 渲染）再点；
+    // 目标已可见则直接点（快速路径）。
     if (e.data && e.data.type === 'bwm-switch-session' && !isPop) {
-      const items = [...document.querySelectorAll('[role=treeitem]')];
-      const target = items.find((t) => String(t.innerText || '').split('\n')[0] === e.data.title);
-      if (target) target.click();
+      const title = e.data.title;
+      const folders = Array.isArray(e.data.folders) ? e.data.folders : [];
+      const findTarget = () => [...document.querySelectorAll('[role=treeitem]')]
+        .find((t) => String(t.innerText || '').split('\n')[0] === title);
+      const target = findTarget();
+      if (target) {
+        target.click();
+      } else if (folders.length) {
+        const chain = folders.slice();
+        const expandNext = () => {
+          const name = chain.shift();
+          if (!name) { const t2 = findTarget(); if (t2) t2.click(); return; }
+          const f = [...document.querySelectorAll('[role="treeitem"]')]
+            .find((t) => String(t.innerText || '').split('\n')[0] === name);
+          if (f && f.getAttribute('aria-expanded') === 'false') f.click(); // 展开该层
+          setTimeout(expandNext, 400); // 等 React 渲染子项
+        };
+        expandNext();
+      }
     }
   });
-  // pop 弹窗 iframe：点击会话 → 通知父页面（转发给主 iframe 切换 + 关闭弹窗）
+  // pop 弹窗 iframe：点击叶子会话 → 通知父页面切换主 iframe（弹窗保持打开，不关闭）
+  // 文件夹节点（可展开/折叠，带 aria-expanded）只做原生展开/折叠，不触发切换；
+  // 关闭弹窗统一由父页面右上角 ✕ 按钮 / 遮罩点击 / ☰ 按钮完成。
   if (isPop) {
     document.addEventListener('click', (e) => {
       const item = e.target && e.target.closest ? e.target.closest('[role=treeitem]') : null;
-      if (item && window.parent !== window) {
-        window.parent.postMessage({ type: 'bwm-pop-select', title: String(item.innerText || '').split('\n')[0] }, location.origin); // P0：targetOrigin 收紧同源
+      if (item && window.parent !== window && !item.hasAttribute('aria-expanded')) {
+        // 解析所属文件夹：DSH 会话树是「扁平虚拟树」（每行独立 SPAN 占位），
+        // 文件夹 treeitem（带 aria-expanded）与其子会话相邻平铺、子项紧随其后渲染。
+        // → 目标前面最近的带 aria-expanded 的 treeitem 即其所属文件夹；
+        //   主 iframe 侧该文件夹可能折叠 → 需先展开才能点到目标会话。
+        const folders = [];
+        const tree = item.closest ? item.closest('[role="tree"]') : null;
+        if (tree) {
+          const allItems = [...tree.querySelectorAll('[role="treeitem"]')];
+          const idx = allItems.indexOf(item);
+          for (let i = idx - 1; i >= 0; i--) {
+            if (allItems[i].hasAttribute('aria-expanded')) {
+              folders.push(String(allItems[i].innerText || '').split('\n')[0]);
+              break; // 扁平树：只需最近一层
+            }
+          }
+        }
+        window.parent.postMessage(
+          { type: 'bwm-pop-select', title: String(item.innerText || '').split('\n')[0], folders },
+          location.origin
+        ); // P0：targetOrigin 收紧同源
       }
     }, true);
   }
