@@ -12,7 +12,7 @@ BWM Friend × DSH「数字人沉浸式工作台」插件——**AI Agent Identit
 ```bash
 # 1. 安装插件包（发布后；当前从 Gitee 或本地 pack 安装）
 npm i dsh-plugin-bwm-friend
-# 或本地：npm i /path/to/dsh-plugin-bwm-friend-0.3.0.tgz
+# 或本地：npm i /path/to/dsh-plugin-bwm-friend-0.3.2.tgz
 
 # 2. profile cordis.yml 引用 bundle patch
 #   bundles: 加入 dsh-plugin-bwm-friend 的 cordis.patch.yml（`dsh --profile <name> …` 自动加载 dsh.bundle.patch）
@@ -50,7 +50,7 @@ DSH Harness → BWM Shell Renderer（subscribe / command dispatch）→ @laikato
 
 - DSH 根 `/`（无参数）→ client `apply()` 完全 no-op，原生界面不动
 - `/?bwm=embedded` → `applyEmbeddedHarness`：centerCol 会话视图 + 侧栏右上抽屉 + 数字人透出
-- `/bwm-friend/work/` → work 页（iframe 内嵌原生 DSH，742px 与陪伴一致，任务信息条上移顶栏）
+- `/bwm-friend/work/` → work 页（iframe 内嵌原生 DSH，响应式 clamp(620px, 48vw, 1080px)，任务信息条上移顶栏）
 - `/bwm-friend/companion/` → 陪伴页（沉浸式视频 + 幕布 + composer + 语音按住说话/回复自动朗读）
 
 ## 开发
@@ -63,7 +63,7 @@ node scripts/build-client.mjs
 cd /Users/zengtian/projects/dsh-sandbox && ./start.sh 3200
 
 # 测试
-npm test                  # core 32 + host 15 + e2e 12
+npm test                  # core 32 + host 17 + e2e 12
 node tests/p2-voice-smoke.cjs    # 语音链路
 node tests/s3-presence-smoke.cjs # presence 事件驱动
 ```

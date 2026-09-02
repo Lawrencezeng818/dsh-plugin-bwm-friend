@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.2 (2026-09-02)
+
+### 修复（全部 ego-browser 实测回归通过）
+- **P1 会话列表无法切换（回归修复）**：`wireSidebarA11y` 在 pop 弹窗模式跳过 inert/aria-hidden——`inert` 会在 hit-testing 阶段吞掉真实鼠标点击（程序化 `.click()` 不受影响，合成事件绕过，自动化回归因此漏检）
+- **P1 TodoPanel 尺寸与原生不一致**：EMBEDDED_CSS 全局 `[class*=root]` `height:100%` 误命中 composer dock 内组件 root，收起态 36px 被撑到 170px、展开 358px → 豁免 `[class*=composerStack] *`；全局滚动条隐藏规则吞掉 `.list` 滚动条 → dock 内恢复 thin/8px。实测收起 38px / 展开 226px / 滚动条可见
+- **弹层「新会话」跨窗口同步**：pop 端捕获拦截 + 转发 `bwm-pop-new-session`，父页转发主 iframe 原生新建+切换（此前弹层内创建后主窗口不跟随，与原生行为不一致）
+- **ask/choice 选项卡片防截断**：卡片内容需 ~802px > 旧固定宽 742px，选项/提交键被裁 → 对话区改响应式 `clamp(620px, 48vw, 1080px)` + 卡片双挂载位（composerSeat/scrollBody）max-width 约束 + 按钮换行
+- **历史会话裸 DSML 控制标记清洗**：显示层 MutationObserver 增量折叠为「历史工具调用·已折叠」占位（原文存 title），不动会话数据
+- **工作区遮罩交互**：首次打开 toast 关闭提示 + Esc 关闭 + cursor/title
+- **读屏降噪**：主 iframe 抽屉收起时 `aria-hidden`+`inert`（仅主 iframe；pop 模式豁免）
+- 登记 `EMBEDDED_SELECTORS.askCard = eT_Osq_`（ask 卡片 hashed 前缀）
+
+### 变更
+- 对话区宽度 742px 固定 → `clamp(620px, 48vw, 1080px)` 响应式（大屏对话区占比过低 + 卡片截断）
+
+### 测试
+- e2e 模型菜单断言修正：回归点是「点击后弹出」（菜单可见且内容非空）；菜单内部结构随 DSH 版本/模型目录而异，不再硬断言推理等级行
+- e2e 弹窗断言对齐 0.3.1 设计：点会话后弹窗保持打开（连续切换），旧断言「点会话后关闭」过时（被旧沙盒进程掩盖）
+- host 新增 2 项 DoS 用例（请求体上限 413 + 进程存活），15 → 17
+- 服务端发布加固：`readJsonBody` 请求体上限 1MB（transcribe 音频放宽 25MB）+ settings PUT/work/task 内联读取同步收口 + 超限前排空请求流（防 keep-alive 连接 ECONNRESET）
+
+## 0.3.1 (2026-08-26)
+
+- 工作区面板会话列表交互重构 + loading 失败态兜底（轮询会话树渲染成功即移除 loading；10s 超时显示失败态+重试，杜绝无限 loading）
+- 嵌入式自动滚动修复（遍历所有候选滚动容器）
+
 ## 0.3.0 (2026-08-24)
 
 ### 架构（Runtime 化）

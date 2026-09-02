@@ -137,3 +137,26 @@ test('Range: bytes=99999999-（超界）→ 416', async () => {
   const r = await req(`/bwm-friend/media/${TOKEN}`, { headers: { Range: `bytes=${TOTAL + 1000}-` } });
   assert.strictEqual(r.status, 416);
 });
+
+/* ── 5. 请求体上限（v0.3.2 发布加固）── */
+test('DoS: POST /work/task 超 1MB body → 4xx 且进程存活（readJsonBody 上限）', async () => {
+  const big = JSON.stringify({ message: 'x'.repeat(1_200_000) });
+  const r = await req('/bwm-friend/work/task', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Connection: 'close' },
+    body: big,
+  });
+  assert.ok(r.status >= 400 && r.status < 500, `期望 4xx，实际 ${r.status}`);
+  const health = await req('/bwm-friend/health');
+  assert.strictEqual(health.status, 200, '超限请求后进程必须存活');
+});
+
+test('DoS: 正常大小 body → 不受上限影响（新连接，避开超限请求后的 keep-alive 竞态）', async () => {
+  const r = await req('/bwm-friend/work/task', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Connection: 'close' },
+    body: JSON.stringify({ message: '' }),
+  });
+  assert.strictEqual(r.status, 200);
+  assert.match(r.text, /有什么任务/);
+});

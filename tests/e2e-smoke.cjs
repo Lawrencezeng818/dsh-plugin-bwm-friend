@@ -44,8 +44,10 @@ const CHROME_EXEC = process.env.BWM_E2E_CHROME || '/Users/zengtian/Library/Cache
     await page.waitForTimeout(600);
     const menuVisible = await frame.locator('.PNUCKq_menu').isVisible().catch(() => false);
     const menuText = menuVisible ? (await frame.locator('.PNUCKq_menu').innerText().catch(() => '')) : '';
-    // 双语兼容：中文「推理等级」/ 英文「Effort」（headless chromium 默认英文 locale）
-    const menuOk = menuVisible && (/推理等级|Effort/.test(menuText));
+    // 回归点是「点击后弹出」：菜单可见且内容非空即可。菜单内部结构（是否含
+    // 推理等级/Effort 行）随 DSH 版本与所选模型目录而异，不作硬断言（曾误报
+    // 失败：3200 测试实例模型 agnes-2.5-flash 无推理等级行）。
+    const menuOk = menuVisible && menuText.trim().length > 0;
     check('模型菜单点击弹出', menuOk, menuText.slice(0, 40).replace(/\n/g, '|'));
 
     // 3. 会话 header 紧凑单行（任务信息条上移顶栏）
@@ -70,12 +72,12 @@ const CHROME_EXEC = process.env.BWM_E2E_CHROME || '/Users/zengtian/Library/Cache
       await page.waitForTimeout(1500);
       const treeCount = await pf.locator('[role=treeitem]').count().catch(() => 0);
       check('弹窗内会话树 ≥1', treeCount > 0, `tree=${treeCount}`);
-      // 点会话 → 弹窗关闭
+      // 点会话 → 弹窗保持打开（0.3.1 设计：便于连续切换；关闭由 ✕/遮罩/Esc/☰ 负责）
       if (treeCount > 0) {
         await pf.locator('[role=treeitem]').nth(1).click().catch(() => {});
         await page.waitForTimeout(1200);
         const popTransform = await pop.evaluate((el) => el.style.transform).catch(() => '');
-        check('点会话后弹窗关闭', popTransform.includes('100%'), popTransform);
+        check('点会话后弹窗保持打开（连续切换）', popTransform.includes('0px'), popTransform);
       }
     }
 
