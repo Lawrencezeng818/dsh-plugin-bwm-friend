@@ -218,3 +218,41 @@ test('auth/login 成功响应不携带 Hub token（服务端持有即可）', as
   assert.strictEqual(body.ok, true);
   assert.ok(!('token' in body), 'token 不得出现在登录响应');
 });
+
+/* ══ 6. settings 写入健壮化（2026-09-03 发布评审 P1）══ */
+
+test('settings: version 服务端管辖，客户端覆写无效', async () => {
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 99 }) });
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.strictEqual(cfg.version, 1, 'version 必须钉在 schema 版本');
+});
+
+test('settings: 未知顶层 key 不落盘', async () => {
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ evilKey: { x: 1 } }) });
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.ok(!('evilKey' in cfg), '未知 key 不得写入配置');
+});
+
+test('settings: 类型非法载荷 → 400 且不落盘', async () => {
+  const r = await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: '垃圾' }) });
+  assert.strictEqual(r.status, 400);
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.ok(cfg.voice && typeof cfg.voice === 'object' && !('0' in cfg.voice), '字符串载荷不得破坏 voice 结构');
+});
+
+test('settings: 并发多 key PUT 全部存活（串行化）', async () => {
+  const writes = [
+    { account: { subject: '并发测试A' } },
+    { llm: { provider: 'local' } },
+    { ui: { mode: 'work' } },
+    { power: { pauseOnBlur: true } },
+    { avatar: { driver: 'video' } },
+    { voice: { volume: 1 } },
+  ];
+  await Promise.all(writes.map((w) => req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) })));
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.strictEqual(cfg.account.subject, '并发测试A');
+  assert.strictEqual(cfg.llm.provider, 'local');
+  assert.strictEqual(cfg.power.pauseOnBlur, true);
+  assert.strictEqual(cfg.voice.volume, 1);
+});
