@@ -22,8 +22,27 @@ writeFileSync(join(home, '.dsh-bwm-friend', 'config.json'), JSON.stringify({ ver
 const mock = await startMockLlmServer();
 const PORT = 8931;
 let failed = 0;
+let window0Buf = null;
 const ok = (name, cond) => { console.log((cond ? 'PASS ' : 'FAIL ') + name); if (!cond) failed = 1; return cond; };
 const base = `http://127.0.0.1:${PORT}`;
+  // 0. 资产管线边界（完成度批次5 红灯）：fixture mp4（tkhd 640x360）+ symlink 夹带
+  const crypto = await import('node:crypto');
+  try {
+    const assetsRoot = join(home, '.bwm-friend', 'assets');
+    mkdirSync(assetsRoot, { recursive: true });
+    const buf = Buffer.alloc(300, 0);
+    Buffer.from('ftypisom').copy(buf, 0);
+    const tag = 50;
+    Buffer.from('tkhd').copy(buf, tag);
+    buf.writeUInt32BE(0, tag + 4); // version 0
+    buf.writeUInt32BE(640 * 65536, tag + 80);
+    buf.writeUInt32BE(360 * 65536, tag + 84);
+    writeFileSync(join(assetsRoot, 'idle-fixture.mp4'), buf);
+    window0Buf = buf;
+    // symlink 夹带：指向 fixture 的软链不得入清单
+    try { await (await import('node:fs')).symlinkSync(join(assetsRoot, 'idle-fixture.mp4'), join(assetsRoot, 'idle-link.mp4')); } catch { /* 权限不足时跳过 */ }
+  } catch { /* 不阻塞主链路 */ }
+
 // 端口占用快败（僵尸 shim = 无 mock env 的假阳性来源）
 try { const stale = await fetch(base + '/bwm-friend/health'); if (stale.status === 200) { console.log('FATAL: 端口 ' + PORT + ' 已被占用（僵尸 shim？）'); process.exit(2); } } catch { /* 空闲，正常 */ }
 const shim = spawn(process.execPath, [join(repo, 'tests', 'verify-shim.mjs'), join(repo, 'lib', 'index.js'), String(PORT)], {
@@ -42,12 +61,33 @@ for (let i = 0; i < 40; i++) {
 }
 ok('shim 启动（HOME 隔离 + mock 注入）', up);
 if (up) {
-  // 0. 主题目录名含 HTML：inventory 契约不崩（symlink 条目另由 host 端点套件覆盖）
   try {
     const evilTheme = join(home, '.bwm-friend', 'assets', '<img src=x onerror=alert(1)>');
     mkdirSync(evilTheme, { recursive: true });
     writeFileSync(join(evilTheme, 'idle-x.mp4'), 'x');
   } catch { /* 不阻塞主链路 */ }
+  // 0.5 资产管线断言
+  try {
+    const hp = JSON.parse(await (await fetch(base + '/bwm-friend/health')).text());
+
+    const inv = JSON.parse(await (await fetch(base + '/bwm-friend/inventory')).text());
+    const fx = inv.items.find((i) => i.name === 'idle-fixture.mp4');
+    ok('inventory: checksum=sha256（流式，与本地哈希一致）', !!fx && typeof fx.checksum === 'string' && /^[0-9a-f]{64}$/.test(fx.checksum) && fx.checksum === crypto.createHash('sha256').update(window0Buf).digest('hex'));
+    ok('inventory: resolution 自 tkhd（640x360）', !!fx && fx.resolution === '640x360');
+    ok('inventory: symlink 条目被拒绝', !inv.items.some((i) => i.name === 'idle-link.mp4'));
+  } catch (e) { ok('inventory 断言异常: ' + e.message, false); }
+
+  // 0.6 迟到素材（先启动后放素材）：watcher 懒挂 + 失效重建包含
+  try {
+    writeFileSync(join(home, '.bwm-friend', 'assets', 'idle-latecomer.mp4'), Buffer.alloc(64, 1));
+    let late = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      const inv2 = JSON.parse(await (await fetch(base + '/bwm-friend/inventory')).text());
+      if (inv2.items.some((it) => it.name === 'idle-latecomer.mp4')) { late = true; break; }
+    }
+    ok('inventory: 迟到素材经懒挂 watcher 自动入列', late);
+  } catch (e) { ok('迟到素材断言异常: ' + e.message, false); }
   // 1. ASR：音频 → 转写
   const asr = await (await fetch(base + '/bwm-friend/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audioBase64: 'dGVzdA==', format: 'mp3' }) })).json();
   ok('ASR 转写走 Mock MiMo（Bearer 接线正确）', asr.ok === true && asr.text === mock.ASR_TEXT) || console.log('  [dbg asr]', JSON.stringify(asr));
