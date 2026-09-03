@@ -1,7 +1,31 @@
 # Changelog
 
-## Unreleased（2026-09-03）
+## 0.4.0 (2026-09-03)
 
+### 修复·第三轮（发布评审路径 B：P0/P1 全闭环，四维评审"需修复后发布"→可发布）
+- **安全 P0**：isSameOriginRequest 重排（dest=document 仅读、Origin:null/file:// 仅读、
+  Origin/Host 不一致提前拒、BWM_TRUSTED_HOSTS 白名单）——封堵顶层表单 text/plain 伪造 JSON
+  打 /work/task 的 RCE 级 CSRF 绕过；云端模板名（远端输入）/皮肤目录名/主题名/模型名
+  innerHTML 统一转义；/auth/status 与登录回显手机号掩码；登录响应不再下发 Hub token
+- **打包 P0**：协议随包副本优先（packages/ 入 files 白名单，行为确定性）；UI 壳随包
+  （static-ui/，BWM_STATIC 默认值不再指向个人工程）；依赖修正（-bwm-protocol
+  +bwm-skin-mira）；LOCAL_ASSET_ROOTS/DSH_WORK_DIR 去个人绝对路径（~/.bwm-friend/assets
+  投递点 + BWM_STATIC 同级素材发现）；新增 tests/release-pack-smoke.mjs 干净机冒烟
+- **settings 健壮化**：writeConfig 原子写；PUT 串行化（withConfigLock）；validateSettings
+  接线（类型非法 400）；version 服务端管辖；未知顶层 key 不落盘
+- **资源治理**：inventory watcher 入 disposers；media token 稳定复用+失效回收；
+  runRealAgentTask 超时上限（BWM_TASK_TIMEOUT_MS）；/transcribe 并发守卫（429）
+- **功能收敛**：引擎弹窗砍装饰 tab（通用/插件/预设）与 alert 占位按钮（模型 tab 保留）；
+  云端模板卡改非交互条目；删除死代码 workChat()
+- **文档**：README env 契约补全（BWM_AUTH_BASE/BWM_UPDATE_URL/BWM_TRUSTED_HOSTS/
+  BWM_TASK_TIMEOUT_MS）+ 素材投递点成文；schema v1 文档标注预留字段
+
+### 测试（第三轮）
+- host-endpoints 17 → **26 断言**（CSRF 绕过/Origin:null/掩码/token/并发丢写等，红灯先行）
+- 新增 **release-pack-smoke**（pack→隔离安装→模块加载→三端点→自包含断言，8 检查）
+- status-sync T1-T14 + p2-proactive 全绿；p2-voice-smoke 无 key 显式 SKIP
+
+## 0.4.0 (2026-09-03) · 第二轮（模板⇒音色/人格联动）
 ### 修复·第二轮（模板⇒音色/人格联动，tests/status-sync-verify.sh T1-T14 全绿；红灯先行 7 FAIL）
 - **P1 切换模板音色不跟随**（用户报告）：桌面版语义 = 切模板音色随模板变（`applyTemplateSwitch` 里 `data.voice` 随模板返回）；插件免刷新切换只 PUT `avatar.theme`，音色死在原地。新增 `__bwmThemeVoice` 预设表（甜心女孩→茉莉、电竞男孩→Milo、可爱孙女HD→冰糖、迷人少妇→Chloe、霸道女总裁→Mia；未知主题保持当前音色，不盲改克隆音）+ 共享入口 `__bwmSwitchTheme`：一次 PUT 原子持久化 theme+voice，随后同步高亮/热切视频/音色下拉与状态
 - **P2 人格不随模板重载**：桌面版人格按模板存储（reload 后 loadPersona 取新模板人格）；插件砍成全局单值但标签仍写"当前模板"，切模板后输入框内容不随动。新增 `avatar.personas`（按主题映射），读取规则 `personas[theme]` 优先、缺失回退 legacy `avatar.persona`（升级零迁移）；`wirePersona` 按 theme 读、保存写整张 personas map（客户端读改写，规避服务端浅合并整表覆盖）；`companionChat` 人格注入同规则按当前主题取
@@ -12,7 +36,7 @@
 - `p2-voice-smoke.cjs` 无 `XIAOMI_MIMO_API_KEY` 时显式 SKIP 并说明（TTS 后端必返 missing-key，此前让人误判为链路回归）
 - host 端点回归 17/17（沙盒 3200 按 `dsh-sandbox/start.sh` 文档重启后）
 
-## Unreleased（2026-09-03 第一轮）
+## 0.4.0 (2026-09-03) · 第一轮（设置状态同步批修）
 
 ### 修复（全部 tests/status-sync-verify.sh 实测回归通过：修复前快照 6 FAIL → 修复后 9 PASS）
 - **P1 设置面板模板初始高亮缺失**：`fillTemplates` 初始高亮读 `localStorage['bwm-config']`——全代码库无任何写入点，高亮永远为空（用户实测：当前是"电竞男孩"的视频，打开设置无对应高亮）。改为与服务端 `/bwm-friend/settings` 单一真相源对齐
