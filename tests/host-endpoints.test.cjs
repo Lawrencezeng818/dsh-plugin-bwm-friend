@@ -317,3 +317,81 @@ test('obs: 请求行含路由/状态码；auth 事件不落敏感原文', async 
   const dump = JSON.stringify(lines);
   assert.ok(!dump.includes('13800001234'), '原始手机号不得入日志');
 });
+
+
+/* ══ 8. 安全对抗评审发现（完成度批次3 红灯）══ */
+const httpRaw = require('node:http');
+
+// 原始请求（可伪造 Host —— 复现 DNS rebinding 形态的唯一方式）
+function rawReq(port, path, method, headers, body) {
+  return new Promise((resolve, reject) => {
+    const r = httpRaw.request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
+
+test('sec: companion/chat 2MB 载荷 → 4xx 且服务存活（P1-1 内存 DoS）', async () => {
+  const big = JSON.stringify({ message: 'x'.repeat(2 * 1024 * 1024) });
+  const r = await req('/bwm-friend/companion/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: big });
+  assert.ok(r.status >= 400 && r.status < 500, '超大 body 必须 4xx，实得 ' + r.status);
+  const h = await req('/bwm-friend/health');
+  assert.strictEqual(h.status, 200, '服务必须存活');
+});
+
+test('sec: rebinding 防线——Host 信任判定（P1-2，子进程求值）', async () => {
+  const { execFileSync } = require('node:child_process');
+  const out = execFileSync(process.execPath, ['-e', `
+    import('file:///Users/zengtian/projects/dsh-plugin-bwm-friend/lib/index.js').then((m) => {
+      const h = m.__securityTestHooks.isTrustedHost;
+      console.log(JSON.stringify([
+        h('127.0.0.1:3200'), h('localhost:80'), h('[::1]:3200'),
+        h('evil.test:3080'), h('box.lan:3200'),
+      ]));
+      process.exit(0);
+    });
+  `], { encoding: 'utf8', timeout: 30000 });
+  const [loopIp, localName, v6, evil, lan] = JSON.parse(out.trim());
+  assert.ok(loopIp, '回环 IP 可信');
+  assert.ok(localName, 'localhost 可信');
+  assert.ok(v6, 'IPv6 回环可信');
+  assert.strictEqual(evil, false, '攻击域不可信');
+  assert.strictEqual(lan, false, 'LAN 默认不可信（需 BWM_TRUSTED_HOSTS 显式扩展）');
+  // 回环正常访问不受影响（同步阻塞后 keep-alive 连接可能被服务端回收 → ECONNRESET 时重试一次）
+  let ok2;
+  try { ok2 = await req('/bwm-friend/settings'); } catch { ok2 = await req('/bwm-friend/settings'); }
+  assert.strictEqual(ok2.status, 200);
+});
+
+test('sec: auth 登录限速（P2-5）', async () => {
+  let got429 = false;
+  for (let i = 0; i < 8; i++) {
+    const r = await req('/bwm-friend/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '13900009999', password: 'wrong' + i }) });
+    if (r.status === 429) { got429 = true; break; }
+  }
+  assert.ok(got429, '同号连续尝试必须触发 429');
+  const other = await req('/bwm-friend/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '13900008888', password: 'x' }) });
+  assert.notStrictEqual(other.status, 429, '异号不受同号限速牵连');
+});
+
+test('sec: 主题目录名含 HTML 时 inventory 契约不崩 + 客户端转义静态断言（P2-4 配套）', async () => {
+  const r = await req('/bwm-friend/inventory');
+  assert.strictEqual(r.status, 200);
+  JSON.parse(r.text); // 不抛即契约成立
+  const src = readFileSync(join('/Users/zengtian/projects/dsh-plugin-bwm-friend', 'lib', 'index.js'), 'utf8');
+  assert.ok(src.includes('__bwmEsc(window.__bwmThemeLabel'), '模板卡主题名必须经 __bwmEsc（防未来裸拼接回退）');
+});
+
+test('sec: 审计留痕——403 与掩码登录入账（覆盖缺口5）', async () => {
+  await req('/bwm-friend/work/task', { method: 'POST', headers: { 'Sec-Fetch-Site': 'cross-site', 'Content-Type': 'text/plain' }, body: '{"message":"x"}' });
+  await new Promise((r) => setTimeout(r, 250));
+  const lines = readLogLines();
+  assert.ok(lines.some((l) => l.ev === 'req' && l.route === 'POST /bwm-friend/work/task' && l.status === 403), '403 必须留痕');
+  const dump = JSON.stringify(lines);
+  assert.ok(!dump.includes('13800001234'), '原始手机号不得入日志');
+});
