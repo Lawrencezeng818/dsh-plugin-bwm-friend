@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#090e18" />
+    <title>Bwm Friend</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="/styles.css?v=20260816-07" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="aurora aurora-one" aria-hidden="true"></div>
+    <div class="aurora aurora-two" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand" aria-label="Mira">
+        <span class="brand-mark">
+          <img src="/brand-mark-54.png" srcset="/brand-mark-54.png 1x, /brand-mark-108.png 2x" alt="Bwm Friend" width="54" height="54" />
+        </span>
+        <span class="brand-copy">
+          <span class="brand-title-row">
+            <b>Bwm Friend</b>
+          </span>
+          <small>be water my friend</small>
+        </span>
+      </div>
+
+      <div class="topbar-actions">
+        <span class="quota-badge" id="quotaBadge" title="对话次数剩余">—</span>
+        <button class="icon-button" id="settingsButton" type="button" aria-label="打开设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="experience">
+      <section class="dialogue-panel" aria-label="对话">
+        <div class="copy-stage reveal" style="--delay: 150ms">
+          <p class="prompt-label" id="turnLabel"></p>
+          <div class="assistant-replies" id="assistantReplies" aria-live="polite"></div>
+          <div class="response-rule">
+            <span></span>
+          </div>
+        </div>
+
+        <div class="history reveal" style="--delay: 220ms">
+          <button class="history-toggle" id="historyToggle" type="button">
+            <span>最近对话</span>
+            <small id="historyCount">0 条</small>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg>
+          </button>
+          <div class="history-list" id="historyList" aria-live="polite"></div>
+        </div>
+
+        <div class="composer-wrap reveal" style="--delay: 280ms">
+          <form class="composer" id="composer">
+            <textarea
+              id="messageInput"
+              rows="1"
+              maxlength="500"
+              placeholder="打字告诉她……"
+              aria-label="输入消息"
+            ></textarea>
+            <div class="voice-orb-wrap">
+              <button
+                class="voice-orb"
+                id="voiceButton"
+                type="button"
+                aria-label="按住说话"
+                aria-pressed="false"
+                title="按住说话"
+              >
+                <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                  <path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8" />
+                </svg>
+                <svg class="stop-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="1" />
+                </svg>
+              </button>
+              <span class="sr-only" id="voiceLabel" aria-live="polite">按住说话</span>
+              <span class="voice-hint" id="voiceHint">点击按着语音输入</span>
+            </div>
+            <button class="send-button" type="submit" aria-label="发送">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 12 14-7-4 14-3-5-7-2Z" />
+                <path d="m12 14 7-9" />
+              </svg>
+            </button>
+          </form>
+          <p class="composer-hint" id="composerHint">Enter 发送 · Shift + Enter 换行</p>
+        </div>
+      </section>
+
+      <section class="presence-panel" aria-label="角色舞台">
+        <div class="stage-frame reveal" style="--delay: 120ms">
+          <video
+            id="avatarVideo"
+            class="avatar-video"
+            playsinline
+            muted
+            autoplay
+            loop
+            preload="metadata"
+          ></video>
+          <img id="avatarImage" class="avatar-image" alt="" />
+          <video
+            id="resultVideo"
+            class="result-video"
+            playsinline
+            preload="auto"
+            aria-label="口型成片"
+          ></video>
+
+          <div class="avatar-placeholder" id="avatarPlaceholder">
+            <div class="portrait-orbit"><i></i><i></i><i></i></div>
+            <div>
+              <strong id="placeholderTitle">选择她的影像</strong>
+              <span id="placeholderCopy">上传一段正脸、光线稳定的视频</span>
+              <button id="placeholderButton" type="button" data-open-upload>选择视频</button>
+            </div>
+          </div>
+
+          <div class="stage-vignette" aria-hidden="true"></div>
+          <button class="replay-button hidden" id="replayButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7-11-7Z" /></svg>
+            播放口型成片
+          </button>
+        </div>
+
+      </section>
+    </main>
+
+    <aside class="settings-panel" id="settingsPanel" aria-hidden="true">
+      <div class="settings-head">
+        <div>
+          <small>角色设置</small>
+          <h2>她的舞台</h2>
+        </div>
+        <button class="icon-button" id="settingsClose" type="button" aria-label="关闭设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+
+      <div class="setting-block account-setting">
+        <div class="setting-title">
+          <span>账号 / 会员</span>
+          <small id="accountStatus">未登录</small>
+        </div>
+        <div id="accountLoggedOut">
+          <label class="provider-field">
+            <span>手机号</span>
+            <input id="loginPhone" type="tel" placeholder="官网注册的手机号" autocomplete="username" />
+          </label>
+          <label class="provider-field">
+            <span>密码</span>
+            <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
+          </label>
+          <button type="button" class="account-btn" id="loginButton">登 录</button>
+          <a class="external-tool-link account-link" href="https://laikaton-tech.com/roadshow" target="_blank" rel="noopener noreferrer">
+            <span><b>没有账号？前往官网注册 →</b></span>
+          </a>
+          <a class="external-tool-link account-link" href="/privacy.html" target="_blank" rel="noopener noreferrer">
+            <span><b>隐私政策</b></span>
+          </a>
+        </div>
+        <div id="accountLoggedIn" class="hidden">
+          <small id="accountSubject">-</small>
+          <button type="button" class="account-btn" id="logoutButton">退出登录</button>
+        </div>
+      </div>
+
+      <div class="setting-block template-setting">
+        <div class="setting-title">
+          <span>预设模板</span>
+          <small id="templateStatus">点击切换角色</small>
+        </div>
+        <div class="template-grid" id="templateGrid">
+          <button type="button" class="template-card" data-template="默认">
+            <b>自定义模板</b>
+            <small>当前形象</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="setting-block voice-setting">
+        <div class="setting-title">
+          <span>音色</span>
+          <small id="voiceStatus">选择后确认切换</small>
+        </div>
+        <select class="voice-select" id="voiceSelect" aria-label="选择音色">
+          <option value="">加载中…</option>
+        </select>
+      </div>
+
+      <div class="setting-block custom-template-setting">
+        <div class="setting-title">
+          <span>我的自定义（会员）</span>
+          <small id="customTemplateStatus">登录后可用</small>
+        </div>
+        <div class="template-grid" id="customTemplateGrid"></div>
+        <button type="button" class="account-btn" id="addCustomTemplate">＋ 添加自定义模板</button>
+      </div>
+
+      <div class="setting-block persona-setting">
+        <div class="setting-title">
+          <span>人格设定</span>
+          <small id="personaTemplateName">当前模板</small>
+        </div>
+        <textarea id="personaInput" rows="5" placeholder="每套模板独立人格：身份背景 + 性格 + 说话风格…" maxlength="2000"></textarea>
+        <div class="custom-form-actions">
+          <button type="button" class="account-btn" id="personaSaveBtn">保存人格</button>
+        </div>
+        <small class="persona-hint">切换模板自动加载对应人格；编辑后保存即生效（对该模板永久生效）</small>
+      </div>
+
+      <div class="setting-block driver-setting">
+        <div class="setting-title">
+          <span>口型方案</span>
+          <small id="avatarDriverStatus">视频驱动</small>
+        </div>
+        <label class="provider-field driver-field">
+          <span>素材类型</span>
+          <select id="avatarDriver" aria-label="选择视频驱动或图片驱动">
+            <option value="video">视频驱动</option>
+            <option value="image">图片驱动</option>
+          </select>
+        </label>
+      </div>
+
+      <a
+        class="external-tool-link"
+        id="silentVideoCreatorLink"
+        href="https://www.runninghub.ai/ai-detail/2082088529447321601?inviteCode=rh-v1118"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span>
+          <b>制作无声动态视频</b>
+        </span>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 16 16 8M10 8h6v6M6 5h5M5 6v13h13v-5" />
+        </svg>
+      </a>
+
+      <div class="setting-block">
+        <div class="setting-title">
+          <span id="assetTypeLabel">驱动视频</span>
+          <small id="avatarName">未选择</small>
+        </div>
+        <label class="upload-zone" for="avatarInput">
+          <input id="avatarInput" type="file" accept="video/mp4,video/quicktime,video/webm" />
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5" />
+          </svg>
+          <strong id="uploadTitle">替换角色视频</strong>
+          <span id="uploadCopy">建议五至十五秒、正脸、少遮挡、画面稳定</span>
+          <i id="uploadProgress"></i>
+        </label>
+      </div>
+
+      <div class="setting-block idle-video-block">
+        <div class="setting-title">
+          <span>待机视频</span>
+          <small id="idleVideoName">未选择</small>
+        </div>
+        <label class="upload-zone compact" for="idleVideoInput">
+          <input
+            id="idleVideoInput"
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm"
+          />
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5" />
+          </svg>
+          <strong>替换待机视频</strong>
+          <span>空闲时静音循环播放，声画成片结束后自然淡回</span>
+          <i id="idleUploadProgress"></i>
+        </label>
+      </div>
+
+      <div class="setting-block llm-provider-setting">
+        <div class="setting-title">
+          <span>语言模型</span>
+          <small id="llmProviderStatus">本地 Qwen</small>
+        </div>
+        <div class="provider-form">
+          <label class="provider-field">
+            <span>模型来源</span>
+            <select id="llmProvider" aria-label="选择本地或三方语言模型">
+              <option value="local">本地 Qwen</option>
+              <option value="external">三方 API</option>
+            </select>
+          </label>
+          <div class="provider-external-fields" id="llmExternalFields">
+            <label class="provider-field">
+              <span>Base URL</span>
+              <input
+                id="llmBaseUrl"
+                type="url"
+                value="https://api.deepseek.com"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+            <label class="provider-field">
+              <span>API Key</span>
+              <input
+                id="llmApiKey"
+                type="password"
+                value=""
+                autocomplete="new-password"
+                placeholder="默认留空"
+                spellcheck="false"
+              />
+            </label>
+            <label class="provider-field">
+              <span>调用模型</span>
+              <input
+                id="llmModel"
+                type="text"
+                list="llmModelPresets"
+                value="deepseek-chat"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <datalist id="llmModelPresets"></datalist>
+            </label>
+            <a
+              class="api-acquire-link"
+              id="apiAcquireLink"
+              href="https://api.deepseek.com"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span>获取 API</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 16 16 8M10 8h6v6M6 5h5M5 6v13h13v-5" />
+              </svg>
+            </a>
+            <p class="provider-privacy">启用后，对话内容会发送到所填写的三方服务。</p>
+          </div>
+          <div class="provider-actions">
+            <button id="clearLlmApiKey" class="quiet-button" type="button">清除已保存 Key</button>
+            <button id="saveLlmProvider" type="button">保存并切换</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-block service-detail">
+        <div class="setting-title"><span>本地服务</span><button id="refreshStatus" type="button">刷新</button></div>
+        <div class="service-row"><span id="llmServiceLabel">语言模型</span><b data-service-text="llm">检查中</b></div>
+        <div class="service-row"><span id="voiceServiceLabel">语音服务</span><b data-service-text="realtime">检查中</b></div>
+        <div class="service-row"><span id="avatarDriverServiceLabel">视频驱动</span><b data-service-text="avatarDriver">检查中</b></div>
+      </div>
+
+      <div class="setting-block about-setting">
+        <div class="setting-title">
+          <span>关于 / 更新</span>
+          <small id="updateStatusText">v1.0.0</small>
+        </div>
+        <div class="about-row">
+          <span class="about-version">当前版本 v<span id="appVersionText">-</span></span>
+          <button type="button" class="quiet-button" id="checkUpdateBtn">检查更新</button>
+        </div>
+        <div id="updateInfoBox" class="hidden"></div>
+      </div>
+    </aside>
+    <button class="settings-scrim" id="settingsScrim" type="button" aria-label="关闭设置"></button>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="modal-mask hidden" id="updateMask">
+      <div class="paywall update-dialog" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+        <button type="button" class="icon-button paywall-close" id="updateClose" aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+        <div class="paywall-brand">Bwm Friend</div>
+        <h3 id="updateTitle">发现新版本</h3>
+        <p class="paywall-desc" id="updateDesc">正在检查更新…</p>
+        <div class="update-notes hidden" id="updateNotes"></div>
+        <div class="update-progress hidden" id="updateProgress">
+          <div class="gen-progress-track"><div class="gen-progress-fill" id="updateProgressFill"></div></div>
+          <p class="gen-progress-msg" id="updateProgressMsg">准备下载…</p>
+        </div>
+        <div class="confirm-actions update-actions">
+          <button type="button" class="account-btn ghost" id="updateLater">稍后再说</button>
+          <button type="button" class="account-btn" id="updateAction">下载更新</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-mask hidden" id="confirmMask">
+      <div class="paywall confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <div class="paywall-brand">Bwm Friend</div>
+        <h3 id="confirmTitle">确认切换</h3>
+        <p class="paywall-desc" id="confirmDesc">确定执行此操作吗？</p>
+        <div class="confirm-actions">
+          <button type="button" class="account-btn confirm-cancel" id="confirmCancel">取 消</button>
+          <button type="button" class="account-btn confirm-ok" id="confirmOk">确 定</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-mask hidden" id="paywallMask">
+      <div class="paywall" role="dialog" aria-modal="true" aria-labelledby="paywallTitle">
+        <button type="button" class="icon-button paywall-close" id="paywallClose" aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+        <div class="paywall-brand">莱卡顿科技</div>
+        <h3 id="paywallTitle">本产品由莱卡顿科技提供</h3>
+        <p class="paywall-desc">
+          前往官网注册登录并升级会员，
+          <br />即可解锁自定义模板（最多 3 套）。
+        </p>
+        <div class="iap-box hidden" id="iapBox">
+          <div class="iap-product" id="iapProductInfo">买断解锁 · 永久会员</div>
+          <button type="button" class="account-btn" id="iapBuyButton">买断解锁（¥198）</button>
+          <button type="button" class="account-btn ghost" id="iapRestoreButton">恢复购买</button>
+          <small class="paywall-sub" id="iapStatus"></small>
+        </div>
+        <a class="account-btn paywall-go" href="https://laikaton-tech.com/roadshow" target="_blank" rel="noopener noreferrer">
+          去官网注册 / 升级会员 →
+        </a>
+        <small class="paywall-sub">https://laikaton-tech.com/roadshow</small>
+      </div>
+    </div>
+
+    <!-- 自定义模板：独立弹窗（向导式 3 步，打开时暂停循环视频省 CPU）-->
+    <div class="modal-mask hidden" id="customTemplateMask">
+      <div class="paywall custom-template-modal" role="dialog" aria-modal="true" aria-labelledby="customTplTitle">
+        <button type="button" class="icon-button paywall-close" id="customTplModalClose" aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+        <div class="paywall-brand">创建自定义模板</div>
+
+        <!-- 步骤指示器 -->
+        <div class="wizard-steps">
+          <div class="wizard-step active" data-wstep="1"><span>1</span>人物</div>
+          <div class="wizard-step" data-wstep="2"><span>2</span>背景</div>
+          <div class="wizard-step" data-wstep="3"><span>3</span>声音</div>
+        </div>
+
+        <div class="custom-template-modal-body">
+          <!-- Step 1: 人物 -->
+          <div class="wizard-panel" id="wizardPanel1">
+            <label class="provider-field">
+              <span>模板标题</span>
+              <input id="customTplName" type="text" placeholder="如：我的 AI 女友" maxlength="64" />
+            </label>
+            <label class="provider-field">
+              <span>人物图片（1 张）</span>
+              <input id="customTplImage" type="file" accept="image/png,image/jpeg,image/webp" />
+              <img id="customTplPreview" class="custom-tpl-preview hidden" alt="照片预览" />
+            </label>
+          </div>
+
+          <!-- Step 2: 背景 -->
+          <div class="wizard-panel hidden" id="wizardPanel2">
+            <div class="provider-field">
+              <span>背景模板（点选预设或自定义）</span>
+              <div class="bg-template-grid" id="bgTemplateGrid">
+                <button type="button" class="bg-template-card" data-bg="老人陪伴"
+                  data-prompt="80年代中国家庭客厅，老式木制家具，暖黄色白炽灯光，墙上挂着全家福黑白照片，老式收音机，搪瓷茶杯，木窗框，窗外傍晚夕阳，怀旧温暖的氛围">
+                  <b>🏠 老人陪伴</b><small>80年代家庭·怀旧温暖</small>
+                </button>
+                <button type="button" class="bg-template-card" data-bg="甜心居家"
+                  data-prompt="现代温馨卧室，暖白色灯光，柔软舒适的床品，浅色窗帘透进清晨阳光，床头柜上小夜灯和照片，墙上挂画，整洁温暖的家居氛围">
+                  <b>🛏️ 甜心居家</b><small>温馨卧室·亲密安心</small>
+                </button>
+                <button type="button" class="bg-template-card" data-bg="都市夜景"
+                  data-prompt="高层公寓落地窗夜景，窗外城市万家灯火，霓虹灯光微微透入，室内暖色台灯，一杯冒热气的茶，现代简约家具，安静治愈的氛围">
+                  <b>🌃 都市夜景</b><small>落地窗·治愈陪伴</small>
+                </button>
+                <button type="button" class="bg-template-card" data-bg="阳台花园"
+                  data-prompt="阳光充足的阳台花园，绿植环绕，藤编座椅，小茶几上下午茶和花，窗边阳光洒落，微风拂过植物，自然清新放松的氛围">
+                  <b>🌿 阳台花园</b><small>绿植阳光·放松生机</small>
+                </button>
+              </div>
+              <textarea id="customTplBg" rows="2" placeholder="留空=保持原图 | 或输入自定义背景，如：海边日落，金色沙滩" maxlength="500"></textarea>
+            </div>
+          </div>
+
+          <!-- Step 3: 声音 -->
+          <div class="wizard-panel hidden" id="wizardPanel3">
+            <div class="provider-field">
+              <span>音色（可选：内置音色 或 克隆你的声音）</span>
+              <select id="customTplVoice">
+                <option value="茉莉">茉莉（御姐/默认）</option>
+                <option value="冰糖">冰糖（甜系）</option>
+                <option value="苏打">苏打</option>
+                <option value="白桦">白桦</option>
+                <option value="Mia">Mia</option>
+                <option value="Chloe">Chloe</option>
+                <option value="Milo">Milo</option>
+                <option value="Dean">Dean</option>
+                <option value="__clone__">🎙️ 我的声音（克隆）…</option>
+              </select>
+              <!-- 声音克隆区（选 __clone__ 时显示） -->
+              <div id="voiceCloneArea" class="hidden">
+                <span>录入你的声音（10-30 秒清晰人声，克隆后数字人用它说话）</span>
+                <div class="voice-clone-row">
+                  <input id="voiceCloneFile" type="file" accept="audio/*,.wav,.mp3,.m4a" />
+                  <button type="button" class="account-btn" id="voiceCloneBtn">🎙️ 克隆我的声音</button>
+                  <span id="voiceCloneStatus" class="voice-clone-status"></span>
+                </div>
+                <p class="voice-clone-tip">建议：安静环境录一段自然说话（朗读一段话即可），10-30 秒效果最佳。</p>
+              </div>
+            </div>
+            <details class="custom-advanced">
+              <summary>高级选项（提示词微调，可选）</summary>
+              <div class="custom-advanced-body">
+                <label class="provider-field">
+                  <span>待机视频提示词</span>
+                  <textarea id="customTplIdlePrompt" rows="2" maxlength="300">平视，固定机位，角色的头随节奏小幅度，微笑</textarea>
+                </label>
+                <label class="provider-field">
+                  <span>说话视频提示词</span>
+                  <textarea id="customTplSpeakPrompt" rows="2" maxlength="300">平视，固定机位，角色的头随节奏小幅度，微笑，对着镜头说话，语速 8 秒 12 个字</textarea>
+                </label>
+              </div>
+            </details>
+          </div>
+
+          <div id="customTplProgress" class="hidden">
+            <div class="gen-progress-track"><div class="gen-progress-fill" id="customTplProgressFill"></div></div>
+            <p class="gen-progress-msg" id="customTplProgressMsg">准备生成…</p>
+          </div>
+        </div>
+
+        <!-- 向导导航 -->
+        <div class="wizard-nav">
+          <button type="button" class="account-btn ghost" id="wizardPrev">← 上一步</button>
+          <button type="button" class="account-btn" id="wizardNext">下一步 →</button>
+          <button type="button" class="account-btn hidden" id="customTplSubmit">🎬 开始生成模板</button>
+          <button type="button" class="account-btn ghost" id="customTplCancel">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js?v=20260818-01" defer></script>
+  </body>
+</html>

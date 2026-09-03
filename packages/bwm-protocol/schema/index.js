@@ -27,7 +27,7 @@ export const SETTINGS_VERSION = 1;
 export const DEFAULT_SETTINGS = {
   version: 1,
   account: { subject: null, loggedIn: false },
-  avatar: { theme: '甜心女孩', idle: null, persona: '', driver: 'video' },
+  avatar: { theme: '甜心女孩', idle: null, persona: '', personas: {}, driver: 'video' },
   voice: { voice: '冰糖', volume: 1 },
   llm: { provider: 'local', baseUrl: '', model: 'deepseek-chat' },
   ui: { mode: 'work', type: 'stage', chatWidth: 720 },

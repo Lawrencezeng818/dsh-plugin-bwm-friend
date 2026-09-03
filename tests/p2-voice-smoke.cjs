@@ -1,6 +1,13 @@
 /* P2-Voice smoke：companion 页聊天 → TTS 自动朗读链路验证（Playwright 真实浏览器） */
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/Users/zengtian/projects/dsh-sandbox/checkout/node_modules/.pnpm/playwright@1.61.1/node_modules/playwright');
 
+// 2026-09-03：TTS 后端需 XIAOMI_MIMO_API_KEY（README 启动前提）。key 只在启动沙盒的
+// shell 环境里；无 key 时 TTS 必返 missing-key（曾让人误判为链路回归）→ 显式跳过并说明。
+if (!process.env.XIAOMI_MIMO_API_KEY) {
+  console.log('SKIP: XIAOMI_MIMO_API_KEY 未设置（在带 key 的 shell 里启动沙盒后重跑本冒烟）');
+  process.exit(0);
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.BWM_E2E_CHROME || '/Users/zengtian/Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell',

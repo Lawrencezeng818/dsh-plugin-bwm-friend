@@ -160,3 +160,61 @@ test('DoS: 正常大小 body → 不受上限影响（新连接，避开超限�
   assert.strictEqual(r.status, 200);
   assert.match(r.text, /有什么任务/);
 });
+
+/* ══ 5. 发布评审 P0 加固（2026-09-03 boss-bug-hunt 路径B）══ */
+
+test('CSRF绕过: 顶层表单形态(dest=document+cross-site) POST /chat → 403', async () => {
+  // 顶层 <form enctype=text/plain> 导航：浏览器发 dest=document + site=cross-site、无 Origin
+  const { status } = await req('/bwm-friend/companion/chat', {
+    method: 'POST',
+    headers: { 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Content-Type': 'text/plain' },
+    body: '{"message":"pwned"}',
+  });
+  assert.strictEqual(status, 403, 'dest=document 只应放行 GET/HEAD，写端点必须 403');
+});
+
+test('CSRF绕过: Origin:null 沙箱页 PUT /settings → 403 且配置不被改写', async () => {
+  // 先用合法无头请求归零基线（红灯期绕过请求可能已污染过沙盒配置）
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: { voice: '冰糖' } }) });
+  const r = await req('/bwm-friend/settings', {
+    method: 'PUT',
+    headers: { Origin: 'null', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voice: { voice: 'HACKED' } }),
+  });
+  assert.strictEqual(r.status, 403, 'origin=null（沙箱 iframe/data: 页）不得驱动写端点');
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.notStrictEqual(cfg.voice.voice, 'HACKED', '绕过请求不得落盘');
+});
+
+test('Origin/Host 不一致提前拒（伪装同源头，重排回归）', async () => {
+  const { status } = await req('/bwm-friend/companion/chat', {
+    method: 'POST',
+    headers: { Origin: 'http://evil.example', 'Content-Type': 'text/plain' },
+    body: 'x',
+  });
+  assert.strictEqual(status, 403);
+});
+
+test('auth/status 不泄露原始手机号（掩码显示，登录态仍可见）', async () => {
+  await req('/bwm-friend/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: '13800001234', password: 'x' }),
+  });
+  const { text } = await req('/bwm-friend/auth/status');
+  assert.ok(!text.includes('13800001234'), '原始手机号不得回显给任意同源脚本');
+  const body = JSON.parse(text);
+  assert.strictEqual(body.loggedIn, true, '登录态必须保留（UI 依赖）');
+});
+
+test('auth/login 成功响应不携带 Hub token（服务端持有即可）', async () => {
+  // 契约回归：dev 路径本就不带 token；生产代理路径禁止把 token 下发客户端
+  const { text } = await req('/bwm-friend/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: '13800001235', password: 'x' }),
+  });
+  const body = JSON.parse(text);
+  assert.strictEqual(body.ok, true);
+  assert.ok(!('token' in body), 'token 不得出现在登录响应');
+});

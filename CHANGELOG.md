@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased（2026-09-03）
+
+### 修复·第二轮（模板⇒音色/人格联动，tests/status-sync-verify.sh T1-T14 全绿；红灯先行 7 FAIL）
+- **P1 切换模板音色不跟随**（用户报告）：桌面版语义 = 切模板音色随模板变（`applyTemplateSwitch` 里 `data.voice` 随模板返回）；插件免刷新切换只 PUT `avatar.theme`，音色死在原地。新增 `__bwmThemeVoice` 预设表（甜心女孩→茉莉、电竞男孩→Milo、可爱孙女HD→冰糖、迷人少妇→Chloe、霸道女总裁→Mia；未知主题保持当前音色，不盲改克隆音）+ 共享入口 `__bwmSwitchTheme`：一次 PUT 原子持久化 theme+voice，随后同步高亮/热切视频/音色下拉与状态
+- **P2 人格不随模板重载**：桌面版人格按模板存储（reload 后 loadPersona 取新模板人格）；插件砍成全局单值但标签仍写"当前模板"，切模板后输入框内容不随动。新增 `avatar.personas`（按主题映射），读取规则 `personas[theme]` 优先、缺失回退 legacy `avatar.persona`（升级零迁移）；`wirePersona` 按 theme 读、保存写整张 personas map（客户端读改写，规避服务端浅合并整表覆盖）；`companionChat` 人格注入同规则按当前主题取
+- **模板切换入口收敛**：`fillTemplates` 与 `fillCustomTemplates` 两处点击各自 PUT 只存 theme（漏音色/人格联动）→ 收敛到唯一共享入口 `__bwmSwitchTheme`（修根不修枝）
+
+### 测试
+- `status-sync-verify.sh`/`verify-shim.mjs` 扩至 **T1-T14**（新增：启动人格按主题读取、切模板音色跟随预设、原子持久化 theme+voice、人格按主题回退/恢复、personas 保存写回）；修复前 7 FAIL → 修复后 ALL PASS
+- `p2-voice-smoke.cjs` 无 `XIAOMI_MIMO_API_KEY` 时显式 SKIP 并说明（TTS 后端必返 missing-key，此前让人误判为链路回归）
+- host 端点回归 17/17（沙盒 3200 按 `dsh-sandbox/start.sh` 文档重启后）
+
+## Unreleased（2026-09-03 第一轮）
+
+### 修复（全部 tests/status-sync-verify.sh 实测回归通过：修复前快照 6 FAIL → 修复后 9 PASS）
+- **P1 设置面板模板初始高亮缺失**：`fillTemplates` 初始高亮读 `localStorage['bwm-config']`——全代码库无任何写入点，高亮永远为空（用户实测：当前是"电竞男孩"的视频，打开设置无对应高亮）。改为与服务端 `/bwm-friend/settings` 单一真相源对齐
+- **P1 音色回显不齐 + 从不持久化**：`fillVoices` 硬编码回显"冰糖"、`voiceSelect` 无 change 监听（选了不保存，刷新即回显错值）。改为回显服务端 `voice.voice`（自定义/克隆音色追加为选项）+ 选择即 PUT 保存
+- **P1 主题状态多路不一致**：点击模板卡只同步 `#templateGrid` 高亮，皮肤卡无高亮联动、"当前模板"标签不热更新 → 同屏三处状态互相矛盾。收敛为共享 `__bwmApplyTheme`（预设区 + 皮肤卡 + 标签一次同步）与 `__bwmHotSwapIdle`（选片规则与加载期一致：皮肤优先→精确匹配→根目录兜底）
+- **"默认"卡值错位**：点击"默认"卡把字面量 `默认` 存进 config，而 inventory 主题名为 `(root)`，加载期选片必失配回退 `idle[0]`（视频与保存主题脱钩）。卡值改存 `(root)`、UI 显示"默认"
+- **主题枚举混入非模板资产**：`custom_uploads`（用户上传杂物）此前会成为可点击模板卡（无 idle → 点击后视频回退根目录，状态再度脱钩）。枚举过滤为 `idle`/`talk` 资产
+- 清理居中模态内无消费的 settings 死 fetch
+
+### 测试
+- 新增 `tests/status-sync-verify.sh` + `tests/verify-shim.mjs`：任意版本 lib 挂独立 shim 服务（HOME 隔离不碰真实配置），headless Chrome 真实渲染 work 页做 T1-T9 DOM 断言；修复前快照复现 6 FAIL，修复后 ALL PASS；host 端点回归 17/17
+
 ## 0.3.2 (2026-09-02)
 
 ### 修复（全部 ego-browser 实测回归通过）
