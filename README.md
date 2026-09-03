@@ -18,13 +18,22 @@ npm i dsh-plugin-bwm-friend
 #   bundles: 加入 dsh-plugin-bwm-friend 的 cordis.patch.yml（`dsh --profile <name> …` 自动加载 dsh.bundle.patch）
 
 # 3. 配置（可选，均有默认值）
-#   环境变量：
-#     XIAOMI_MIMO_API_KEY  — 语音 ASR/TTS（MiMo）
-#     DEEPSEEK_API_KEY     — 陪伴聊天（Mira）
-#     BWM_ASSET_ROOTS      — 数字人视频资产目录（逗号分隔）
-#     BWM_STATIC           — BWM 前端页目录
-#     BWM_UI_PORT          — BWM 服务探测端口
-#     DSH_WORK_DIR         — 任务工作目录
+#   环境变量（2026-09-03 发布评审补全契约；均可选，无则用内置默认）：
+#     XIAOMI_MIMO_API_KEY  — 语音 ASR/TTS（MiMo；无则语音功能显式降级）
+#     DEEPSEEK_API_KEY     — 陪伴聊天（Mira）——读宿主 ~/.dsh/.credentials.yaml，无需 env
+#     BWM_ASSET_ROOTS      — 数字人视频资产目录（逗号分隔多个；默认扫描
+#                            ~/.bwm-friend/assets 与 BWM_STATIC 同级 heygem-data/input）
+#     BWM_STATIC           — BWM 前端壳目录（默认用包内 static-ui/，一般无需设置）
+#     BWM_UI_PORT          — BWM 服务探测端口（默认 7860）
+#     DSH_WORK_DIR         — Agent 任务工作目录（默认用户主目录）
+#     BWM_AUTH_BASE        — 登录/云同步代理基址（广州 Hub；缺省=dev 本地验证模式）
+#     BWM_UPDATE_URL       — 更新检查清单地址（缺省=内置默认）
+#     BWM_TRUSTED_HOSTS    — Host 白名单（逗号分隔 host:port；设后非白名单 Host 一律 403，
+#                            彻底关闭 DNS rebinding 残余风险；默认不启用）
+#     BWM_TASK_TIMEOUT_MS  — Agent 任务超时上限（默认 600000）
+#
+#   数字人视频素材投递点：把 idle-*/heygem-*.mp4 放进 ~/.bwm-friend/assets（可带主题子目录），
+#   或安装皮肤包 @laikaton/bwm-skin-*（依赖已声明，npm i 自动就位）。
 ```
 
 验证：启动 DSH web → `http://localhost:3200/bwm-friend/work/`（work 页）与 `/bwm-friend/companion/`（陪伴页）。
@@ -62,8 +71,10 @@ node scripts/build-client.mjs
 # 沙盒
 cd /Users/zengtian/projects/dsh-sandbox && ./start.sh 3200
 
-# 测试
-npm test                  # core 32 + host 17 + e2e 12
+# 测试（host 端点回归需活沙盒；语音冒烟需 XIAOMI_MIMO_API_KEY）
+npm test                  # core 32 + host 26 + e2e
+node tests/release-pack-smoke.mjs # 干净机发布冒烟（pack→隔离安装→三端点）
+bash tests/status-sync-verify.sh  # 设置状态同步 T1-T14（headless Chrome 真渲染）
 node tests/p2-voice-smoke.cjs    # 语音链路
 node tests/s3-presence-smoke.cjs # presence 事件驱动
 ```
