@@ -12,6 +12,8 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 
 const BASE = process.env.BWM_E2E_BASE || 'http://127.0.0.1:3200';
 
@@ -255,4 +257,63 @@ test('settings: 并发多 key PUT 全部存活（串行化）', async () => {
   assert.strictEqual(cfg.llm.provider, 'local');
   assert.strictEqual(cfg.power.pauseOnBlur, true);
   assert.strictEqual(cfg.voice.volume, 1);
+});
+
+/* ══ 7. 可观测性（完成度地图批次1）══ */
+const SANDBOX_HOME = process.env.BWM_E2E_HOME || '/Users/zengtian/projects/dsh-sandbox/home';
+const LOG_PATH = join(SANDBOX_HOME, '.dsh-bwm-friend', 'logs', 'host.log');
+const readLogLines = () => {
+  try {
+    return readFileSync(LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch { return []; }
+};
+
+test('obs: health 深度化（版本/uptime/组件状态）', async () => {
+  const { status, text } = await req('/bwm-friend/health');
+  assert.strictEqual(status, 200);
+  const j = JSON.parse(text);
+  assert.strictEqual(j.version, '0.4.0', '版本号必须出现在 health');
+  assert.strictEqual(typeof j.uptimeSec, 'number');
+  assert.strictEqual(typeof j.components.voice.configured, 'boolean');
+  assert.ok(j.components.assets.roots >= 0);
+  assert.ok(['hub', 'dev'].includes(j.components.auth.mode));
+});
+
+test('obs: metrics 请求计数与延迟分位', async () => {
+  await req('/bwm-friend/health');
+  await req('/bwm-friend/health');
+  await req('/bwm-friend/settings');
+  const { status, text } = await req('/bwm-friend/metrics');
+  assert.strictEqual(status, 200);
+  const j = JSON.parse(text);
+  const h = j.requests['GET /bwm-friend/health'];
+  assert.ok(h && h.count >= 2, 'health 计数 >= 2');
+  assert.strictEqual(typeof h.p50Ms, 'number');
+  assert.strictEqual(typeof h.p95Ms, 'number');
+  assert.ok(j.requests['GET /bwm-friend/settings'], 'settings 路由有条目');
+  assert.strictEqual(typeof j.totals, 'object');
+});
+
+test('obs: 审计日志 config.write 落盘（JSON 行）', async () => {
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ui: { mode: 'work' } }) });
+  await new Promise((r) => setTimeout(r, 200));
+  const lines = readLogLines();
+  assert.ok(lines.some((l) => l.ev === 'config.write'), '必须存在 config.write 事件');
+});
+
+test('obs: 审计日志 非法写入留痕 config.write_rejected', async () => {
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: '垃圾' }) });
+  await new Promise((r) => setTimeout(r, 200));
+  const lines = readLogLines();
+  assert.ok(lines.some((l) => l.ev === 'config.write_rejected'), '400 必须留痕');
+});
+
+test('obs: 请求行含路由/状态码；auth 事件不落敏感原文', async () => {
+  await req('/bwm-friend/auth/status');
+  await new Promise((r) => setTimeout(r, 200));
+  const lines = readLogLines();
+  assert.ok(lines.some((l) => l.ev === 'req' && l.route === 'PUT /bwm-friend/settings' && l.status === 200));
+  assert.ok(lines.some((l) => l.ev === 'auth.status'));
+  const dump = JSON.stringify(lines);
+  assert.ok(!dump.includes('13800001234'), '原始手机号不得入日志');
 });
