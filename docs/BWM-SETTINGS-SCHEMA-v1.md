@@ -74,3 +74,19 @@ normalizeSettings(cfg)  // → 与默认合并补齐
 - 新设置项必须先进 schema（三端同步）——禁止任一端私加字段
 - token/密钥**永不进 schema**（account 只存 subject/loggedIn）
 - 改枚举（mode/driver/provider）= major（破坏性），需评审
+
+## 预留字段（2026-09-03 发布评审标注）
+
+以下字段在 schema v1 中保留、但当前 host 无消费点——**发布说明/市场文案不得宣称对应能力**，直到接线：
+
+| 字段 | 现状 |
+|---|---|
+| `voice.volume` | 无音量 UI；TTS 播放未读取 |
+| `avatar.idle` | 空闲视频实际由 inventory 皮肤优先规则现场选取 |
+| `avatar.driver` | 未读取（恒视频驱动） |
+| `power.*` | 无消费点 |
+| `llm.*` | 聊天硬编码 `deepseek-chat` + DeepSeek 官方端点；provider/model 选择未接线 |
+| `ui.type` / `ui.chatWidth` | 未读取 |
+| `account.*` | 登录态在内存 `authSession`，从不写回 config |
+
+接线或删除前，这些字段仅作为**前向兼容占位**存在（normalizeSettings 会补默认值，validateSettings 不强约束）。

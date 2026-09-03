@@ -52,7 +52,7 @@ kill "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null
 echo "── 状态同步断言（隔离 HOME · 真实路由 · lib=$(basename "$LIB")）──"
 # 只取 <pre id="out"> 结果块（驱动页脚本源码同样含 PASS/FAIL 字样，必须避开）
 sed -n '/<pre id="out">/,/<\/pre>/p' "$TMP/dom.html" \
-  | grep -oE '(PASS|FAIL) T[0-9][^<]*|DONE|FAIL exception[^<]*' | sed 's/[[:space:]]*$//'
+  | grep -oE '(PASS|FAIL)[^<]*|DONE' | sed 's/[[:space:]]*$//'
 # verdict 以 <title> 为准（pre 块之外的源码字面量不再干扰）
 grep -o '<title>SYNC-[^<]*</title>' "$TMP/dom.html" | head -1
 if grep -q '<title>SYNC-ALL-PASS</title>' "$TMP/dom.html"; then echo "✅ ALL PASS"; exit 0
