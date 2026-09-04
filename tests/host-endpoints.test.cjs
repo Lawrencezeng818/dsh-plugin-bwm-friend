@@ -272,7 +272,7 @@ test('obs: health 深度化（版本/uptime/组件状态）', async () => {
   const { status, text } = await req('/bwm-friend/health');
   assert.strictEqual(status, 200);
   const j = JSON.parse(text);
-  assert.strictEqual(j.version, '0.4.0', '版本号必须出现在 health');
+  assert.strictEqual(j.version, '0.5.0', '版本号必须出现在 health');
   assert.strictEqual(typeof j.uptimeSec, 'number');
   assert.strictEqual(typeof j.components.voice.configured, 'boolean');
   assert.ok(j.components.assets.roots >= 0);

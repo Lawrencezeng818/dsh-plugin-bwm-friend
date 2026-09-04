@@ -31,6 +31,12 @@ npm i dsh-plugin-bwm-friend
 #     BWM_TRUSTED_HOSTS    — Host 白名单（逗号分隔 host:port；设后非白名单 Host 一律 403，
 #                            彻底关闭 DNS rebinding 残余风险；默认不启用）
 #     BWM_TASK_TIMEOUT_MS  — Agent 任务超时上限（默认 600000）
+#     BWM_TASK_MIN_MS      — 任务最短耗时接缝（测试用；并发 429 确定性验证）
+#     BWM_AGENT_MOCK       — =1 跳过 dsh agent 模块真实导入（挂起/超时路径测试接缝）
+#     BWM_MIMO_BASE_URL    — 语音 ASR/TTS 端点覆写（默认小米 MiMo；测试注入 Mock）
+#     BWM_CHAT_BASE_URL    — 陪伴聊天端点覆写（默认 DeepSeek；测试注入 Mock）
+#     BWM_LOG_DISABLE      — =1 关闭审计日志（默认开；JSON 行 · ~/.dsh-bwm-friend/logs/host.log）
+#     BWM_LOG_MAX_BYTES    — 审计日志轮转阈值（默认 5MB → .1）
 #
 #   数字人视频素材投递点：把 idle-*/heygem-*.mp4 放进 ~/.bwm-friend/assets（可带主题子目录），
 #   或安装皮肤包 @laikaton/bwm-skin-*（依赖已声明，npm i 自动就位）。

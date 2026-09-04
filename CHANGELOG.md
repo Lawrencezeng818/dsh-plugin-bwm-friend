@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 (2026-09-03) · 完成度地图定版（九行全部 100%）
+
+### 可观测性 40→100
+- health 深度化（version/uptimeSec/components 五件）；新增 GET /metrics（路由计数/错误/延迟分位 + 业务总量）
+- 结构化审计日志（JSON 行 · 5MB 轮转 · BWM_LOG_MAX_BYTES/BWM_LOG_DISABLE 接缝 · subject 掩码）
+- 🐛 update-check 版本硬编码 '0.3.2' 漂移事故 → PLUGIN_VERSION 单源 package.json
+
+### 陪伴智能 65→100
+- Mock MiMo ASR/TTS + Mock DeepSeek 注入接缝（BWM_MIMO_BASE_URL/BWM_CHAT_BASE_URL）——语音链路 E2E 不再依赖真 key
+- 语音+聊天+记忆链路 E2E 12 检查；记忆抽取五类模式单测
+
+### 安全基线 80→100（对抗评审 3×P1+3×P2 全闭环）
+- P1-1 chat 载荷无上限 → readJsonBody 1MB；P1-2 DNS rebinding 整体绕过 → isTrustedHost 回环白名单；
+  P1-3 任务并发无上限+超时 agent 裸奔 → in-flight≤2(429)+dispose；P2-4 symlink 外发 → lstat 拒绝；
+  P2-5 登录爆破 → 按 subject 分桶限速(60s/5)+错误统一 http-<status>；P2-6 主体信息最小化（仅后 2 位）
+- docs/THREAT-MODEL-v1.md（九威胁防线 + 六项残余风险明示）
+
+### 工作模式 75→100
+- BWM_AGENT_MOCK 接缝 + 挂起 agent shim：真挂起超时/dispose 中止/taskTimeouts 记账/并发 429 七检查
+- 🐛 runRealAgentTask 本地 const process TDZ 地雷排雷（改名 procSteps）
+
+### 资产管线 90→100
+- checksum 升级流式 sha256（mtime/size 缓存）；resolution=tkhd best-effort 解析（零外部依赖）
+- 🐛 懒挂 watcher 根治「先启动后放素材」缓存陈旧（GUI 主题丢失最初根因）
+
+### 设置同步 90→100
+- 迁移完备/损坏兜底/并发读写交错/默认形状/schema additive 版本 12 断言
+
+### 外壳 95→100
+- EMBEDDED_SELECTORS 抗改版回归：headless Chrome+CDP（Node 内建 WebSocket 零依赖）真渲染 DOM 分级断言
+  （hard 常驻结构=FAIL 门槛；soft 条件组件=记录）
+- companion 页视觉基线入库；work 页 headless 挂起已知（记录于提交材料）
+
+### 发布工程 90→100
+- 离线可装性最强实证：npm pack → --offline 安装 → 装产物全冒烟；更新检查三态（新版/同版/不可达 fail-open）
+
+### 生态层 30→100
+- examples/sdk-consumer.mjs 外部消费者参考实现；compareVersion 补为协议级导出
+- tests/negotiation.test.mjs 多宿主协商矩阵 6 断言；tests/protocol-conformance.e2e.mjs 公开契约 10 断言
+
+### 回归基线（全绿）
+host-endpoints 36 · chain-e2e 12 · task-timeout 7 · settings-robust 12 · embedded-selectors 11 ·
+release-offline 9 · negotiation 6 · protocol-conformance 10 · memory 4 · T1-T14 状态同步
+
 ## 0.4.0 (2026-09-03)
 
 ### 修复·第三轮（发布评审路径 B：P0/P1 全闭环，四维评审"需修复后发布"→可发布）
