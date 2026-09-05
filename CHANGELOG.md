@@ -67,6 +67,7 @@ release-offline 9 · negotiation 6 · protocol-conformance 10 · memory 4 · T1-
 ### 测试（第三轮）
 - host-endpoints 17 → **26 断言**（CSRF 绕过/Origin:null/掩码/token/并发丢写等，红灯先行）
 - 新增 **release-pack-smoke**（pack→隔离安装→模块加载→三端点→自包含断言，8 检查）
+- 新增 **release-fresh-dsh**（`test:fresh`，真实 DSH 装载链路发布门槛，15 检查）：全新 HOME/DSH_HOME → `dsh plugin add <tgz>` → bundle 自动登记 → 安装产物为 tgz 真实拷贝（非 symlink）且 lib 与仓库构建产物哈希一致 → 启动独立实例 → health 版本/work/companion/根路径页面级断言；`--keep` 保留实例供人工/浏览器复验（全新实例浏览器实测：38 provider 原生目录同步、work/companion 结构完整、零页面 JS 错误）
 - status-sync T1-T14 + p2-proactive 全绿；p2-voice-smoke 无 key 显式 SKIP
 
 ## 0.4.0 (2026-09-03) · 第二轮（模板⇒音色/人格联动）

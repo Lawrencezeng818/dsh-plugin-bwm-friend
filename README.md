@@ -12,7 +12,15 @@ BWM Friend × DSH「数字人沉浸式工作台」插件——**AI Agent Identit
 ```bash
 # 1. 安装插件包（发布后；当前从 Gitee 或本地 pack 安装）
 npm i dsh-plugin-bwm-friend
-# 或本地：npm i /path/to/dsh-plugin-bwm-friend-0.3.2.tgz
+# 或本地：npm i /path/to/dsh-plugin-bwm-friend-<版本>.tgz
+# 官方安装命令等价：dsh plugin --profile web add /path/to/<包>.tgz
+#   （自动 initProfile + pnpm add + bundle 登记到 dsh.profile.bundles）
+
+# 发布前必跑两级干净环境安装验证（模拟从未装过本插件的机器）：
+npm run test:pack    # 级1：包自包含——pack→隔离 npm i→模块加载→三端点（8 检查）
+npm run test:fresh   # 级2：真实 DSH 装载——全新 HOME/DSH_HOME→dsh plugin add tgz→
+                     #   bundle 自动登记→安装产物哈希比对→启动独立实例→
+                     #   health/work/companion 页面断言（--keep 保留实例人工/浏览器复验）
 
 # 2. profile cordis.yml 引用 bundle patch
 #   bundles: 加入 dsh-plugin-bwm-friend 的 cordis.patch.yml（`dsh --profile <name> …` 自动加载 dsh.bundle.patch）
