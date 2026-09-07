@@ -1,5 +1,4 @@
 # Mira Agent 身份配置文件
-# 部署设备：2015 MacBook Air (192.168.3.10)
 
 # === 基础身份 ===
 agent_name: Mira
@@ -115,9 +114,7 @@ boundaries:
     - 跨设备控制（仅限本机 + 云端 API）
 
 # === 部署信息 ===
+# （实例级部署信息不入库：设备/内网IP等在部署侧单独维护）
 deployment:
-  device: 2015 MacBook Air
-  ip: 192.168.3.10
   runtime: DSH Desktop
   plugin: dsh-plugin-bwm-friend
-  status: active
