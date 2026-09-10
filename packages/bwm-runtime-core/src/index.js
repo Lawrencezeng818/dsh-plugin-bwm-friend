@@ -250,17 +250,47 @@ function nextVersion(v) {
 
 /* ── Ledger Runtime（P1.4：Event→Context→Ledger，Agent 行为生命周期）──
  * Agent 经历（timeline）与任务状态（tasks）由事件驱动更新；timeline 即 P6 读模型
+ * 2026-09-10 B2 反超第一步（专利4 实施例链：Action→Event→Outcome→Ledger→persist→reload→Agent 可用）：
+ *   可选 opts.store = { append(entry), load(): Promise<entry[]> } —— 逐事件写透 + 启动恢复；
+ *   store 由 Shell 提供（JSON-in-settings / 未来宿主侧 JSONL/SQL P6），core 保持纯逻辑无 I/O。
+ *   append 失败不阻断事件管线：emit 'ledger:persist.error'；load 失败静默（运行态照常）。
+ *   timeline 仍归 DOMAIN_POLICY 'runtime'（快照不含）——账本走独立 store，不混入快照通道。
  */
-function wireLedger(bus, context) {
+function wireLedger(bus, context, opts = {}) {
+  const store = opts.store || null;
   const record = (actionType, detail) => {
+    const d = detail || {};
+    const entry = { action_type: actionType, outcome: d.outcome || 'success', summary: d.summary || '', at: new Date().toISOString() };
+    // 透传未来语义字段（relationship_delta/emotion_context 等，专利4）——JSON 安全过滤
+    for (const k of Object.keys(d)) {
+      if (!(k in entry) && d[k] !== undefined && typeof d[k] !== 'function') entry[k] = d[k];
+    }
     const timeline = Array.isArray(context.get('timeline')) ? context.get('timeline') : [];
-    timeline.push({ action_type: actionType, outcome: detail.outcome || 'success', summary: detail.summary || '', at: new Date().toISOString() });
+    timeline.push(entry);
     context.set('timeline', timeline.slice(-200)); // 上限 200 条
+    if (store && typeof store.append === 'function') {
+      try { store.append(entry); } catch (err) {
+        try { bus.emit('ledger:persist.error', { error: String((err && err.message) || err), entry }); } catch (_) { /* 通知失败不再抛 */ }
+      }
+    }
   };
+  // 启动恢复：持久层是事实源，旧账本在前、本会话新事件在后，合并后仍守 200 上限
+  if (store && typeof store.load === 'function') {
+    Promise.resolve()
+      .then(() => store.load())
+      .then((prev) => {
+        if (Array.isArray(prev) && prev.length) {
+          const cur = Array.isArray(context.get('timeline')) ? context.get('timeline') : [];
+          context.set('timeline', prev.slice(-200).concat(cur).slice(-200));
+        }
+      })
+      .catch(() => { /* 恢复失败不阻断 runtime（降级为内存级，与旧行为一致） */ });
+  }
   const off = [
-    bus.on('agent.task.success', (p) => { context.set('tasks', { last: 'success', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { outcome: 'success', summary: p && p.summary }); }),
-    bus.on('agent.task.failed', (p) => { context.set('tasks', { last: 'failed', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { outcome: 'failed', summary: p && p.summary }); }),
-    bus.on('agent.tool.call', (p) => record('tool_execution', { outcome: 'started', summary: p && p.tool })),
+    // 透传完整 payload（outcome/summary 定名，其余字段如 relationship_delta/emotion_context 原样进账本）
+    bus.on('agent.task.success', (p) => { context.set('tasks', { last: 'success', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { ...(p || {}), outcome: 'success', summary: p && p.summary }); }),
+    bus.on('agent.task.failed', (p) => { context.set('tasks', { last: 'failed', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { ...(p || {}), outcome: 'failed', summary: p && p.summary }); }),
+    bus.on('agent.tool.call', (p) => record('tool_execution', { ...(p || {}), outcome: 'started', summary: p && p.tool })),
   ];
   return () => off.forEach((d) => d());
 }
@@ -360,12 +390,13 @@ function createRequestMachine(bus, context) {
 }
 
 /* ── Runtime 协议面（BWM Protocol v1：hello/welcome + subscribe/emit）── */
-function createRuntime() {
+function createRuntime(opts = {}) {
   const bus = createEventBus();
   const context = createAgentContext();
   context.set('identity', { ...IDENTITY_PRESET });           // Identity Runtime：我是谁
   context.set('personality', { ...PERSONALITY_PRESET });     // 人格特征
-  wireLedger(bus, context);           // Ledger Runtime（事件 → timeline/tasks）
+  // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2/专利4 实施例）
+  wireLedger(bus, context, opts.ledger ? { store: opts.ledger } : {});   // Ledger Runtime（事件 → timeline/tasks）
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
   createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
   let handshake = null;

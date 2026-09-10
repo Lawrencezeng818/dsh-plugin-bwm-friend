@@ -199,6 +199,34 @@ async function saveSettings(cfg) {
   }
 }
 
+/* ── Ledger 账本 store（2026-09-10 B2 反超第一步 / 专利4 实施例）──
+ * wireLedger 的持久化适配器：逐事件 append（内存镜像 + 单飞行写穿 settings 通道），
+ * load() 返回持久层全量（core 侧异步恢复、合并守 200 上限）。
+ * settings 通道由宿主落盘（memory.json 同目录）；未来平移宿主 JSONL/SQL（P6）只换本函数。
+ * 内存镜像上限 500 条（context 内仍守 core 的 200 条读取窗口）。
+ */
+function createLedgerStore() {
+  let mirror = null;
+  let prime = loadSettings()
+    .then((cfg) => { mirror = Array.isArray(cfg.wireLedger) ? cfg.wireLedger.slice() : []; })
+    .catch(() => { mirror = []; });
+  let saving = Promise.resolve();
+  return {
+    append(entry) {
+      if (!mirror) { mirror = []; }
+      mirror.push(entry);
+      if (mirror.length > 500) mirror = mirror.slice(-500);
+      saving = saving
+        .then(() => loadSettings())
+        .then((cfg) => saveSettings({ ...cfg, wireLedger: mirror }))
+        .catch(() => { /* 写失败由 core 侧无感知（append 已同步成功入镜像）；宿主恢复时以最近一次成功为准 */ });
+    },
+    load() {
+      return prime.then(() => (mirror ? mirror.slice() : []));
+    },
+  };
+}
+
 async function loadInventory() {
   try {
     const res = await fetch(INVENTORY_URL);
@@ -1073,7 +1101,10 @@ function apply(ctx) {
 
   // Phase 0：Runtime 协议面（P1.1-1.4：Event Kernel/Context/Ledger/Presence 状态机全部在 runtime-core）
   // P1.4：Shell 只持有 bus（订阅）+ context（只读）+ hydrateContext（恢复）——不持有任何核心状态机
-  const runtime = createRuntime();
+  // 2026-09-10 B2 反超第一步：wireLedger 落盘（专利4 实施例：persist→reload→Agent 可用）——
+  //   timeline 仍归 'runtime' 快照策略不含；账本走独立 store（settings 通道，宿主侧持久），
+  //   未来平移宿主 JSONL/SQL（P6 agent_actions）时只换本函数实现，core 不动。
+  const runtime = createRuntime({ ledger: createLedgerStore() });
   const bus = runtime.bus;
   const context = runtime.context;
   const adapter = resolveAdapter();

@@ -179,3 +179,77 @@ test('request: reply → replying；end → idle（完整生命周期）', () =>
   assert.strictEqual(rs.state, 'idle');
   assert.strictEqual(rs.requestId, null);
 });
+
+/* ── 2026-09-10 B2 反超第一步：wireLedger 落盘（专利4 硬门槛链）──
+ * 链：Action→Event→Outcome→Ledger entry→store.append（persist）→ 新 runtime store.load（reload）
+ *    → context.timeline 恢复 → Agent 可读（"Agent can use it"）
+ */
+test('Ledger 落盘: 逐事件 append（冻结形状）+ reload 恢复 → Agent 可读', async () => {
+  const backing = []; // 模拟持久层（settings/JSONL/SQL 皆是此接口的宿主实现）
+  const mkStore = () => ({
+    append(e) { backing.push(JSON.parse(JSON.stringify(e))); },
+    load() { return Promise.resolve(backing.map((e) => JSON.parse(JSON.stringify(e)))); },
+  });
+
+  // 会话 1：两个行为事件 → 逐条落盘
+  const r1 = createRuntime({ ledger: mkStore() });
+  r1.emit('agent.tool.call', { tool: 'web.search' });
+  r1.emit('agent.task.success', { taskId: 't9', summary: '查到 3 条' });
+  assert.strictEqual(backing.length, 2, '逐事件 append');
+  // 冻结形状：action_type/outcome/summary/at
+  assert.strictEqual(backing[0].action_type, 'tool_execution');
+  assert.strictEqual(backing[0].outcome, 'started');
+  assert.strictEqual(backing[1].outcome, 'success');
+  assert.ok(backing[1].at, 'ISO 时间戳在');
+
+  // 会话 2（重启）：同一持久层 → timeline 恢复 → Agent 可读
+  const r2 = createRuntime({ ledger: mkStore() });
+  await new Promise((res) => setTimeout(res, 10)); // store.load 为异步恢复
+  const tl = r2.context.get('timeline');
+  assert.strictEqual(tl.length, 2, '重启后 timeline 恢复');
+  assert.strictEqual(tl[1].action_type, 'agent_task');
+  assert.strictEqual(tl[1].summary, '查到 3 条');
+});
+
+test('Ledger 语义字段透传（relationship_delta 等，专利4 前向兼容）+ 恢复合并守 200 上限', async () => {
+  const backing = [];
+  const mkStore = () => ({
+    append(e) { backing.push(e); },
+    load() { return Promise.resolve(backing.slice()); },
+  });
+  // 未雨绸缪字段：detail 里带 relationship_delta → 落盘保留（core 不解释，只忠实记录）
+  const r1 = createRuntime({ ledger: mkStore() });
+  r1.emit('agent.task.success', { taskId: 't1', summary: '陪看猫片', relationship_delta: { trust: +1 }, emotion_context: '开心' });
+  const withDelta = backing.find((e) => e.relationship_delta);
+  assert.deepStrictEqual(withDelta.relationship_delta, { trust: 1 });
+
+  // 恢复合并：持久层 200 条 + 本会话新事件 → 合并后仍 200（不重复、不丢失新事件）
+  for (let i = 0; i < 200; i++) backing.push({ action_type: 'agent_task', outcome: 'success', summary: `h${i}`, at: new Date().toISOString() });
+  const r2 = createRuntime({ ledger: mkStore() });
+  r2.emit('agent.task.success', { taskId: 'new', summary: '新会话事件' });
+  await new Promise((res) => setTimeout(res, 10));
+  const tl = r2.context.get('timeline');
+  assert.strictEqual(tl.length, 200, '合并守 200');
+  assert.strictEqual(tl[tl.length - 1].summary, '新会话事件', '本会话新事件不被恢复覆盖');
+});
+
+test('Ledger append 抛错不阻断事件管线（ledger:persist.error 通知）', () => {
+  const errs = [];
+  const r = createRuntime({
+    ledger: { append() { throw new Error('disk full'); }, load() { return Promise.resolve([]); } },
+  });
+  r.subscribe('ledger:persist.error', (e) => errs.push(e.error));
+  r.emit('agent.task.success', { taskId: 't1', summary: 'x' });
+  assert.strictEqual(errs.length, 1, '错误经事件通知');
+  assert.ok(/disk full/.test(errs[0]));
+  assert.strictEqual(r.context.get('timeline').length, 1, 'context 更新不受影响');
+  assert.strictEqual(r.context.get('tasks').last, 'success', '任务状态不受影响');
+});
+
+test('向后兼容: 不传 ledger 时行为与 v0.5 一致（无 store 不落盘不报错）', async () => {
+  const r = createRuntime();
+  r.emit('agent.tool.call', { tool: 'x' });
+  assert.strictEqual(r.context.get('timeline').length, 1);
+  await new Promise((res) => setTimeout(res, 5)); // 无 store → 无恢复路径
+  assert.strictEqual(r.context.get('timeline').length, 1);
+});

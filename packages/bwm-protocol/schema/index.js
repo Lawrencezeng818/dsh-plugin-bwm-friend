@@ -1,5 +1,15 @@
 // BWM Protocol v1 — machine-readable constants (mirror of schema/*.json)
 // 冻结 v1.0.0（2026-08-24）。Additive-only：新增 = minor；修改/删除 = major。
+// 2026-09-09：PRESENCE 不再手写镜像，改为从 PRESENCE-V1-DICTIONARY 机器形态派生（机器权威：
+// 词典是唯一真理源，本文件与 state.json 均为其投影；测试 test/presence-dictionary.test.mjs 强制三方一致）。
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const _dictPath = join(dirname(fileURLToPath(import.meta.url)), 'presence-dictionary.json');
+const PRESENCE_DICTIONARY = JSON.parse(readFileSync(_dictPath, 'utf8'));
+const _dp = PRESENCE_DICTIONARY.properties;
+
 export const PROTOCOL_VERSION = '1.0';
 
 export const EVENTS = [
@@ -10,7 +20,17 @@ export const EVENTS = [
   'presence:state', 'presence:mode',
 ];
 
-export const PRESENCE = ['idle', 'attention', 'thinking', 'executing', 'speaking', 'success', 'error', 'offline', 'transition'];
+// legacy 单层枚举：由词典派生（D1：working/listening 待 minor bump 吸收前不进入）
+export const PRESENCE = Object.freeze([..._dp.legacy_presence_enum.const]);
+// 三层模型派生出口（消费方可选采用；semantic/activity 定义见词典）
+export const SEMANTIC_STATES = Object.freeze([..._dp.semantic_states.const]);
+export const ACTIVITY_STATES = Object.freeze([..._dp.activity_states.const]);
+export const ARBITRATION_PRIORITY = Object.freeze([..._dp.arbitration_priority.const]);
+// legacy 单层 → [semantic, activity] 映射（activity 为 null 表示语义态无活动细节）
+export const toLayered = (s) => {
+  const def = _dp.legacy_to_layered.properties[s];
+  return def ? [...def.const] : null;
+};
 export const MODES = ['work', 'companion', 'meeting'];
 export const EMOTIONS = ['neutral', 'warm', 'curious', 'focused', 'concerned', 'playful', 'proud', 'empathetic', 'tired'];
 

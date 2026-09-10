@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://laikaton.tech/schemas/bwm/presence-dictionary-v1.json",
+  "title": "BWM Presence v1 Canonical Dictionary (machine form)",
+  "description": "Machine-readable derivation of PRESENCE-V1-DICTIONARY.md. Single source of truth for all presence enums (Protocol/SDK/UI/Patent). Authority: the dictionary document; this file is its derived machine form. CI rule: no consumer enum may add/remove/rename states outside this dictionary.",
+  "type": "object",
+  "dictionary_version": "1.1.0-draft",
+  "authority": {
+    "canonical_source": "PRESENCE-V1-DICTIONARY.md",
+    "protocol_role": "derived",
+    "sdk_role": "derived",
+    "ui_role": "derived",
+    "patent_role": "derived"
+  },
+  "properties": {
+    "semantic_states": {
+      "description": "在场语义层(Presence 本体)",
+      "type": "array",
+      "const": ["available", "engaged", "transitioning", "unavailable"]
+    },
+    "activity_states": {
+      "description": "活动层(运行细节,仲裁产生)",
+      "type": "array",
+      "const": ["idle", "attention", "listening", "thinking", "executing", "working", "speaking", "success", "error"]
+    },
+    "transient_activity_states": {
+      "type": "array",
+      "const": ["success", "error"]
+    },
+    "arbitration_priority": {
+      "description": "高→低。Arbitration Priority != State Semantic Priority:仅表示并存时谁占据主导表现,不是业务优先级(终审 D2 批准)。",
+      "type": "array",
+      "const": ["working", "executing", "speaking", "thinking", "listening", "attention", "success", "error", "idle"]
+    },
+    "transient_fallback_ms": {
+      "type": "object",
+      "properties": {
+        "success": { "const": 1400 },
+        "error": { "const": 2000 }
+      }
+    },
+    "semantic_exclusive_states": {
+      "description": "语义层独占,不参与活动仲裁",
+      "type": "array",
+      "const": ["transitioning", "unavailable"]
+    },
+    "migration_blocked_activities": {
+      "description": "迁移门控:这些活动态活跃时拒绝迁移请求(专利3 门控)",
+      "type": "array",
+      "const": ["executing", "working"]
+    },
+    "legacy_presence_enum": {
+      "description": "Protocol v1 state.json 的单层枚举(冻结子集)",
+      "type": "array",
+      "const": ["idle", "attention", "thinking", "executing", "speaking", "success", "error", "offline", "transition"]
+    },
+    "legacy_to_layered": {
+      "description": "单层→(semantic, activity) 映射;null 表示该语义态无活动细节",
+      "type": "object",
+      "properties": {
+        "idle": { "const": ["available", "idle"] },
+        "attention": { "const": ["engaged", "attention"] },
+        "listening": { "const": ["engaged", "listening"] },
+        "thinking": { "const": ["engaged", "thinking"] },
+        "executing": { "const": ["engaged", "executing"] },
+        "working": { "const": ["engaged", "working"] },
+        "speaking": { "const": ["engaged", "speaking"] },
+        "success": { "const": ["engaged", "success"] },
+        "error": { "const": ["engaged", "error"] },
+        "offline": { "const": ["unavailable", null] },
+        "transition": { "const": ["transitioning", null] }
+      }
+    },
+    "pending_protocol_additions": {
+      "description": "词典新增、待下次 minor bump 吸收进协议枚举(D1 批准:词典先行,协议渐进吸收)",
+      "type": "array",
+      "const": ["working", "listening"]
+    }
+  }
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 (2026-09-10) · wireLedger 落盘（B2 反超第一步 / 专利4 实施例）
+
+- **Ledger 持久化**：`wireLedger(bus, context, opts)` / `createRuntime(opts)` 新增可选 `ledger` store 适配器（`append(entry)` + `load()`）——逐事件写透、启动异步恢复、合并守 200 上限；append 失败 emit `ledger:persist.error` 不阻断事件管线；不传 ledger 时行为与 0.5 完全一致（向后兼容）
+- **语义字段透传**：task/tool 事件 payload 整体进账本（`relationship_delta`/`emotion_context` 等未来语义字段原样保留，专利4 前向兼容）；core 保持纯逻辑无 I/O，store 由 Shell 提供
+- **Shell 接线**：`createLedgerStore()`（src/client.js）——内存镜像 + 单飞行写穿 settings 通道（宿主落盘，memory.json 同目录），镜像上限 500；未来平移宿主 JSONL/SQL（P6 agent_actions）只换 store 实现
+- **边界不变**：`DOMAIN_POLICY.timeline` 仍为 `'runtime'`（persistSnapshot 快照不含 timeline）——账本走独立通道，不混快照
+- **测试**：core 套件 32→36 全绿（落盘/恢复链、透传+合并上限、失败不阻断、向后兼容）；host 端点套件 36 失败为 HEAD 既有（需活 DSH 宿主），与本次改动无关（基线 diff 为空）
+
 ## 0.5.0 (2026-09-03) · 完成度地图定版（九行全部 100%）
 
 ### 可观测性 40→100
