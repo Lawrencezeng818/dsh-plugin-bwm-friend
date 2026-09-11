@@ -82,11 +82,11 @@ DSH Harness → BWM Shell Renderer（subscribe / command dispatch）→ @laikato
 # 构建 client（改 src/client.js 后）
 node scripts/build-client.mjs
 
-# 沙盒
-cd /Users/zengtian/projects/dsh-sandbox && ./start.sh 3200
+# 沙盒（本地开发隔离环境，路径按机器自定）
+cd ~/projects/dsh-sandbox && ./start.sh 3200
 
-# 测试（host 端点回归需活沙盒；语音冒烟需 XIAOMI_MIMO_API_KEY）
-npm test                  # core 32 + host 26 + e2e
+# 测试（host 端点回归需活沙盒；媒体用例无资产时自动播种 fixture，播不了显式 SKIP；语音冒烟需 XIAOMI_MIMO_API_KEY）
+npm test                  # core 36 + host 38 + e2e
 node tests/release-pack-smoke.mjs # 干净机发布冒烟（pack→隔离安装→三端点）
 bash tests/status-sync-verify.sh  # 设置状态同步 T1-T14（headless Chrome 真渲染）
 node tests/p2-voice-smoke.cjs    # 语音链路

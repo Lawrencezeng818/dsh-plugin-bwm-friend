@@ -12,10 +12,14 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { readFileSync } = require('node:fs');
+const { readFileSync, mkdirSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const BASE = process.env.BWM_E2E_BASE || 'http://127.0.0.1:3200';
+// 沙盒 HOME（日志断言 / fixture 播种投递点）；可 BWM_E2E_HOME 覆盖
+const SANDBOX_HOME = process.env.BWM_E2E_HOME || '/Users/zengtian/projects/dsh-sandbox/home';
+// 版本单源 package.json（禁硬编码——0.5.0 → 0.6.0 漂移事故与 PLUGIN_VERSION 同款教训）
+const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
 
 async function req(path, { method = 'GET', headers = {}, body } = {}) {
   const res = await fetch(BASE + path, { method, headers, body });
@@ -94,7 +98,38 @@ test('穿越: 编码斜杠 ..%2f..%2fetc → 403/404 且不返回敏感内容', 
 let TOKEN = null;
 let TOTAL = null;
 
-test('inventory: 媒体 token 为随机 UUID（32 hex，防路径泄漏）', async () => {
+// fixture 播种：沙盒无 idle 资产时写入确定性媒体（投递点 ~/.bwm-friend/assets，watcher 懒重建）。
+// 三态语义：播种成功且可见='ok'；HOME 不可写/远端 BASE='env-blocked'（SKIP，不装绿不假红）；
+// 写成功但 inventory 迟迟不见='stale'（产品 bug：热投递失效，硬红——README 投递流程回归）。
+async function hasIdleItem() {
+  const inv = await req('/bwm-friend/inventory');
+  if (inv.status !== 200) return false;
+  return (JSON.parse(inv.text).items || []).some((i) => i.type === 'idle');
+}
+async function ensureIdleFixture() {
+  if (await hasIdleItem()) return 'ok';
+  let wrote = false;
+  try {
+    const dir = join(SANDBOX_HOME, '.bwm-friend', 'assets', 'fixture');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'idle-fixture.mp4'), Buffer.alloc(4096, 0x66)); // 真实文件（symlink 会被清单拒绝）
+    wrote = true;
+  } catch { /* 沙盒 HOME 不可写 → env-blocked */ }
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (await hasIdleItem()) return 'ok';
+  }
+  return wrote ? 'stale' : 'env-blocked';
+}
+
+test('资产热投递: 启动后创建资产根+主题子目录 → inventory 可见（README 投递流程，不重启）', async (t) => {
+  const st = await ensureIdleFixture();
+  if (st === 'env-blocked') return t.skip(`沙盒 HOME 不可写且无 idle 资产（设 BWM_E2E_HOME 或向 ${join(SANDBOX_HOME, '.bwm-friend', 'assets')} 投递 idle-*.mp4）`);
+  assert.strictEqual(st, 'ok', '资产已按 README 流程投递（~/.bwm-friend/assets 主题子目录）但 inventory 未重建——热投递失效（懒挂 watcher 回归），用户必须重启才能看到素材');
+});
+
+test('inventory: 媒体 token 为随机 UUID（32 hex，防路径泄漏）', async (t) => {
+  if ((await ensureIdleFixture()) !== 'ok') return t.skip('前置未满足：无 idle 资产（热投递用例会给出产品级红灯）');
   const { status, text } = await req('/bwm-friend/inventory');
   assert.strictEqual(status, 200);
   const data = JSON.parse(text);
@@ -104,7 +139,8 @@ test('inventory: 媒体 token 为随机 UUID（32 hex，防路径泄漏）', asy
   assert.match(TOKEN, /^[0-9a-f]{32}$/, `token 应为随机 UUID 32hex，实际 ${TOKEN}`);
 });
 
-test('Range: 全量 → 206 + 记录 total', async () => {
+test('Range: 全量 → 206 + 记录 total', async (t) => {
+  if (!TOKEN) return t.skip('前置未满足：无 idle 资产');
   const r = await req(`/bwm-friend/media/${TOKEN}`);
   assert.strictEqual(r.status, 206);
   const m = /^bytes \d+-\d+\/(\d+)$/.exec(r.headers.get('content-range') || '');
@@ -113,13 +149,15 @@ test('Range: 全量 → 206 + 记录 total', async () => {
   assert.ok(TOTAL > 1000, '媒体文件应有合理大小');
 });
 
-test('Range: bytes=0-99 → 206 len=100', async () => {
+test('Range: bytes=0-99 → 206 len=100', async (t) => {
+  if (!TOKEN) return t.skip('前置未满足：无 idle 资产');
   const r = await req(`/bwm-friend/media/${TOKEN}`, { headers: { Range: 'bytes=0-99' } });
   assert.strictEqual(r.status, 206);
   assert.strictEqual(Number(r.headers.get('content-length')), 100);
 });
 
-test('Range: bytes=-100（suffix）→ 206 且为末尾 100 字节（曾错返前 501 字节）', async () => {
+test('Range: bytes=-100（suffix）→ 206 且为末尾 100 字节（曾错返前 501 字节）', async (t) => {
+  if (!TOKEN) return t.skip('前置未满足：无 idle 资产');
   const r = await req(`/bwm-friend/media/${TOKEN}`, { headers: { Range: 'bytes=-100' } });
   assert.strictEqual(r.status, 206);
   assert.strictEqual(Number(r.headers.get('content-length')), 100);
@@ -129,13 +167,15 @@ test('Range: bytes=-100（suffix）→ 206 且为末尾 100 字节（曾错返�
   assert.strictEqual(Number(m[2]), TOTAL - 1);
 });
 
-test('Range: bytes=100-50（start>end）→ 416（曾负 Content-Length 崩/404）', async () => {
+test('Range: bytes=100-50（start>end）→ 416（曾负 Content-Length 崩/404）', async (t) => {
+  if (!TOKEN) return t.skip('前置未满足：无 idle 资产');
   const r = await req(`/bwm-friend/media/${TOKEN}`, { headers: { Range: 'bytes=100-50' } });
   assert.strictEqual(r.status, 416);
   assert.match(r.headers.get('content-range') || '', /bytes \*\/\d+/);
 });
 
-test('Range: bytes=99999999-（超界）→ 416', async () => {
+test('Range: bytes=99999999-（超界）→ 416', async (t) => {
+  if (!TOKEN) return t.skip('前置未满足：无 idle 资产');
   const r = await req(`/bwm-friend/media/${TOKEN}`, { headers: { Range: `bytes=${TOTAL + 1000}-` } });
   assert.strictEqual(r.status, 416);
 });
@@ -259,8 +299,32 @@ test('settings: 并发多 key PUT 全部存活（串行化）', async () => {
   assert.strictEqual(cfg.voice.volume, 1);
 });
 
+test('ledger: wireLedger 经 settings 通道落盘（0.6.0 专利4 实施例——白名单必须放行，否则 Shell 账本生产链路静默断裂）', async () => {
+  const ledger = [
+    { seq: 1, ev: 'agent.task.success', ts: 1757000000001, payload: { relationship_delta: { trust: 1 } } },
+    { seq: 2, ev: 'agent.tool.call', ts: 1757000000002, payload: { tool: 'fs.read' } },
+  ];
+  const put = await req('/bwm-friend/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wireLedger: ledger }),
+  });
+  assert.strictEqual(put.status, 200, `合法数组载荷应 200，实际 ${put.status}`);
+  const cfg = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.deepStrictEqual(cfg.wireLedger, ledger, 'wireLedger 必须原样落盘并可回读（createLedgerStore 的唯一持久通道）');
+  const bad = await req('/bwm-friend/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wireLedger: '垃圾' }),
+  });
+  assert.strictEqual(bad.status, 400, '非数组 wireLedger 必须 400（防字符串/对象破坏账本结构）');
+  // 其他写路径不携带 wireLedger 时不得清掉已有账本（读改写并发语义的最小保证）
+  await req('/bwm-friend/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: { volume: 1 } }) });
+  const cfg2 = JSON.parse((await req('/bwm-friend/settings')).text);
+  assert.ok(Array.isArray(cfg2.wireLedger) && cfg2.wireLedger.length === 2, '无关字段 PUT 不得清空已落盘账本');
+});
+
 /* ══ 7. 可观测性（完成度地图批次1）══ */
-const SANDBOX_HOME = process.env.BWM_E2E_HOME || '/Users/zengtian/projects/dsh-sandbox/home';
 const LOG_PATH = join(SANDBOX_HOME, '.dsh-bwm-friend', 'logs', 'host.log');
 const readLogLines = () => {
   try {
@@ -272,7 +336,7 @@ test('obs: health 深度化（版本/uptime/组件状态）', async () => {
   const { status, text } = await req('/bwm-friend/health');
   assert.strictEqual(status, 200);
   const j = JSON.parse(text);
-  assert.strictEqual(j.version, '0.5.0', '版本号必须出现在 health');
+  assert.strictEqual(j.version, PKG_VERSION, '版本号必须出现在 health（单源 package.json）');
   assert.strictEqual(typeof j.uptimeSec, 'number');
   assert.strictEqual(typeof j.components.voice.configured, 'boolean');
   assert.ok(j.components.assets.roots >= 0);

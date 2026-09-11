@@ -2,6 +2,16 @@
 
 ## 0.6.0 (2026-09-10) · wireLedger 落盘（B2 反超第一步 / 专利4 实施例）
 
+### 发布收敛（2026-09-11 · 可发布门禁全绿）
+
+- 🐛 **P0 wireLedger settings 白名单静默丢包**：host PUT 白名单不含 `wireLedger` → `createLedgerStore` 唯一持久通道在生产形状下**完全不落盘**（core 单测注入 store 全绿、端到端断裂——"声称与实现不符"典型）。放行 + 数组形状守卫（非数组 400）+ 无关字段 PUT 不清账本；host 红灯回归 4 断言；跨重启 reload 真机验证闭环（含 `relationship_delta` 语义字段透传）
+- 🐛 **资产热投递盲区**：`~/.bwm-friend/assets` 启动时不存在（README 文档化投递流程）→ watcher 挂不上 → 用户后投递素材重启前不可见（0.5.0 懒挂 watcher 只救"根已存在"场景）。watcher 升级 `recursive`（主题子目录内后投递也触发失效）+ 存在挂不上根时缓存 TTL 2s 兜底（重扫成功即补挂，回纯事件驱动）；host 红灯回归实证（全新初始态播种→免重启可见）
+- host 套件 36→**38**：health 版本断言改单源 package.json（硬编码 '0.5.0' 漂移复发——PLUGIN_VERSION 同款教训在测试侧清零）；媒体用例 fixture 自播种（沙盒无资产时确定性绿，HOME 不可写显式 SKIP 不装绿）
+- 环境：repo 依赖安装恢复（缺 node_modules 致皮肤发现 0 → T9 皮肤卡红，环境债非代码回归）；`package-lock.json` 入库（dev 安装可复现）
+- 文档对齐：README 测试计数/路径泛化；Settings Schema v1 补记 `wireLedger` 运行时通道键（与"新设置项先进 schema"纪律的张力留档，未来三端吸收或平移宿主通道时收口）
+- 包内容审计：零密钥/零内网地址/零个人运行时路径；架构边界 grep 审计：Runtime 侧红线全 0、Shell 侧核心逻辑定义（function 级）全 0
+- 门禁：**core 36 · host 38 · e2e 12 · T1-T14 17 项 · pack 冒烟 8 · fresh DSH 装载 15 —— 全绿**
+
 - **Ledger 持久化**：`wireLedger(bus, context, opts)` / `createRuntime(opts)` 新增可选 `ledger` store 适配器（`append(entry)` + `load()`）——逐事件写透、启动异步恢复、合并守 200 上限；append 失败 emit `ledger:persist.error` 不阻断事件管线；不传 ledger 时行为与 0.5 完全一致（向后兼容）
 - **语义字段透传**：task/tool 事件 payload 整体进账本（`relationship_delta`/`emotion_context` 等未来语义字段原样保留，专利4 前向兼容）；core 保持纯逻辑无 I/O，store 由 Shell 提供
 - **Shell 接线**：`createLedgerStore()`（src/client.js）——内存镜像 + 单飞行写穿 settings 通道（宿主落盘，memory.json 同目录），镜像上限 500；未来平移宿主 JSONL/SQL（P6 agent_actions）只换 store 实现

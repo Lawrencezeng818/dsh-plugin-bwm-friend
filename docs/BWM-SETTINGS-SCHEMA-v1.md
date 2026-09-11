@@ -90,3 +90,9 @@ normalizeSettings(cfg)  // → 与默认合并补齐
 | `account.*` | 登录态在内存 `authSession`，从不写回 config |
 
 接线或删除前，这些字段仅作为**前向兼容占位**存在（normalizeSettings 会补默认值，validateSettings 不强约束）。
+
+## 运行时通道键（非用户设置项，2026-09-11 补记）
+
+| 键 | 现状 | 治理状态 |
+|---|---|---|
+| `wireLedger`（顶层，数组，客户端镜像上限 500） | 0.6.0 起经 settings 通道落盘：`createLedgerStore`（Shell）的唯一持久路径；host PUT 白名单放行 + 数组形状守卫（非数组 400）；无关字段 PUT 不清账本 | ⚠️ 它是运行时账本通道而非用户设置，与 §五"新设置项先进 schema"纪律存在措辞张力（已留档）——未来三端吸收（schema minor bump）或平移宿主 JSONL/SQL 通道（P6）时收口 |
