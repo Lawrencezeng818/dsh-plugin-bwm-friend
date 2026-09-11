@@ -10,6 +10,14 @@
  * 后续引入真正 bundler 后拆分 src/event-bus.js / src/runtime.js / src/index.js。
  */
 
+/* ── 感知路由器（专利5 交底书 v0.3 §四 实现；跨域路由与一致性编排，纯逻辑）── */
+const {
+  createPerceptionRouter,
+  DOMAIN_CLASS,
+  UPDATE_MODES,
+  PERCEPTION_ERRORS,
+} = require('./perception-router.js');
+
 /* ── Event 版本登记（Additive-only；载荷演进 bump，订阅方按 version 兼容解析）── */
 // 与 docs/BWM-PROTOCOL-v1.md §2.1 一致（审计：协议枚举 ↔ 代码完全一致）
 const EVENT_VERSIONS = {
@@ -462,4 +470,9 @@ module.exports = {
   negotiate,
   compareVersion,
   RUNTIME_CAPABILITIES,
+  // 感知路由器（专利5 v0.3）：感知事件的跨状态域路由与一致性编排
+  createPerceptionRouter,
+  DOMAIN_CLASS,
+  UPDATE_MODES,
+  PERCEPTION_ERRORS,
 };
