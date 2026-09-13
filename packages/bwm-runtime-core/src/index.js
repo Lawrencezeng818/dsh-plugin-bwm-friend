@@ -295,6 +295,26 @@ function nextVersion(v) {
  *   append 失败不阻断事件管线：emit 'ledger:persist.error'；load 失败静默（运行态照常）。
  *   timeline 仍归 DOMAIN_POLICY 'runtime'（快照不含）——账本走独立 store，不混入快照通道。
  */
+/* ── 任务域更新（专利1 [0043]：任务域表征「当前任务状态与最近任务状态」）──
+ * 历史缺陷 F2（2026-09-13 外部评审核验坐实）：原实现以 context.set('tasks', {last,taskId,at})
+ *   整体替换，抹掉视图写入的 pending（当前任务），使「当前任务状态」在事件后丢失，
+ *   权1「当前任务状态与最近任务状态」因此零实测支撑。
+ * 现为合并写：保留既有字段；pending 移出已完成项；recent 记录最近完成列表（上限 10）。
+ * 与关系域同一模式，满足 [0048] 字段可扩展。
+ */
+function updateTaskState(context, { taskId = null, outcome = null, at = null } = {}) {
+  const raw = context.get('tasks');
+  const prev = raw && typeof raw === 'object' ? { ...raw } : {};
+  const stamp = at || new Date().toISOString();
+  const next = { ...prev, last: outcome, taskId, at: stamp };
+  if (Array.isArray(prev.pending)) {
+    next.pending = prev.pending.filter((t) => !t || t.id !== taskId);
+  }
+  const done = { id: taskId, stage: outcome, at: stamp };
+  next.recent = [done, ...(Array.isArray(prev.recent) ? prev.recent.filter((t) => !t || t.id !== taskId) : [])].slice(0, 10);
+  context.set('tasks', next);
+}
+
 function wireLedger(bus, context, opts = {}) {
   const store = opts.store || null;
   const record = (actionType, detail) => {
@@ -327,8 +347,8 @@ function wireLedger(bus, context, opts = {}) {
   }
   const off = [
     // 透传完整 payload（outcome/summary 定名，其余字段如 relationship_delta/emotion_context 原样进账本）
-    bus.on('agent.task.success', (p) => { context.set('tasks', { last: 'success', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { ...(p || {}), outcome: 'success', summary: p && p.summary }); }),
-    bus.on('agent.task.failed', (p) => { context.set('tasks', { last: 'failed', taskId: p && p.taskId, at: new Date().toISOString() }); record('agent_task', { ...(p || {}), outcome: 'failed', summary: p && p.summary }); }),
+    bus.on('agent.task.success', (p) => { updateTaskState(context, { taskId: p && p.taskId, outcome: 'success' }); record('agent_task', { ...(p || {}), outcome: 'success', summary: p && p.summary }); }),
+    bus.on('agent.task.failed', (p) => { updateTaskState(context, { taskId: p && p.taskId, outcome: 'failed' }); record('agent_task', { ...(p || {}), outcome: 'failed', summary: p && p.summary }); }),
     bus.on('agent.tool.call', (p) => record('tool_execution', { ...(p || {}), outcome: 'started', summary: p && p.tool })),
   ];
   return () => off.forEach((d) => d());
@@ -556,6 +576,7 @@ module.exports = {
   createPresenceMachine,
   createRequestMachine,
   wireLedger,
+  updateTaskState,
   wireRelationship,
   RELATIONSHIP_STAGES,
   RELATIONSHIP_POLICY,
