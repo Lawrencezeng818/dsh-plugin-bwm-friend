@@ -18,6 +18,13 @@ const {
   PERCEPTION_ERRORS,
 } = require('./perception-router.js');
 
+/* ── 关系账本（专利4 权1 六步机制链：准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入，可验证可重放）── */
+const {
+  createRelationshipLedger,
+  RULE_TABLES,
+  LEDGER_ERRORS,
+} = require('./relationship-ledger.js');
+
 /* ── Event 版本登记（Additive-only；载荷演进 bump，订阅方按 version 兼容解析）── */
 // 与 docs/BWM-PROTOCOL-v1.md §2.1 一致（审计：协议枚举 ↔ 代码完全一致）
 const EVENT_VERSIONS = {
@@ -517,6 +524,44 @@ function createRequestMachine(bus, context) {
   return () => off.forEach((d) => d());
 }
 
+/**
+ * 家族边界接线（专利4 ⇄ 专利5）：把感知路由器产出的「候选写入指令」消费为关系账本条目。
+ *
+ * 感知路由器只决策"某域是否允许写入"，**不做关系增量计算、不写关系账本**（其文件头声明）；
+ * 本函数即那条声明所指的「账本端」——准入后的确定性增量计算与账本写入由关系账本模块独占。
+ * 共享事件标识（update.eventId）在此串联感知侧与账本侧，保证同源可溯。
+ */
+function bridgePerceptionToLedger(ledger, update, opts = {}) {
+  if (!ledger || !update) return { ok: false, error: 'missing_ledger_or_update' };
+  const payload = update.payload || {};
+  return ledger.submit(
+    {
+      eventId: update.eventId,                 // 共享事件标识（跨域串联）
+      eventType: opts.eventType || 'companion_chat',
+      summary: payload.summary || '',
+      contextRef: opts.contextRef || null,
+      presenceState: opts.presenceState || null,
+      evidenceSource: 'perception',            // 感知派生事件 → 置信度系数 = 显著性÷10
+      subjectId: update.subjectId,
+      relationScope: update.relationScope,
+      salience: payload.salience == null ? 0 : payload.salience,
+      confidence: opts.confidence == null ? 1 : opts.confidence,
+      userConfirmed: !!opts.userConfirmed,
+      at: update.at,
+    },
+    {
+      binding: {
+        subjectId: update.subjectId,
+        relationScope: update.relationScope,
+        evidenceSource: 'perception',
+        basis: 'perception_route_permitted',
+      },
+      snapshot: opts.snapshot || {},
+      at: update.at,
+    }
+  );
+}
+
 /* ── Runtime 协议面（BWM Protocol v1：hello/welcome + subscribe/emit）── */
 function createRuntime(opts = {}) {
   const bus = createEventBus();
@@ -526,6 +571,8 @@ function createRuntime(opts = {}) {
   // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2/专利4 实施例）
   wireLedger(bus, context, opts.ledger ? { store: opts.ledger } : {});   // Ledger Runtime（事件 → timeline/tasks）
   wireRelationship(bus, context);      // Relationship Runtime（行为事件 → 关系状态/亲密度；专利1 [0071]）
+  // Relationship Ledger（专利4 权1 六步机制链）：候选事件 → 准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入
+  const relationshipLedger = createRelationshipLedger(opts.relationshipLedger || {});
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
   createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
   let handshake = null;
@@ -534,6 +581,7 @@ function createRuntime(opts = {}) {
     version: '1.0',
     bus,       // 事件总线（Shell 订阅渲染）
     context,   // 共享上下文（Shell 只读 runtime 域；shellSet 写 shared 域）
+    relationshipLedger, // 关系账本（专利4：可验证/可重放的关系资产；查询与重放由调用方使用）
     hydrateContext(raw) { context.hydrate(raw); }, // 快照恢复（runtime 内部，绕过 ownership）
     // Runtime v1.1：持久化快照（只含 persist 域——运行态不落盘，决策在 Runtime）
     persistSnapshot() {
@@ -575,6 +623,10 @@ module.exports = {
   createAgentContext,
   createPresenceMachine,
   createRequestMachine,
+  createRelationshipLedger,
+  RULE_TABLES,
+  LEDGER_ERRORS,
+  bridgePerceptionToLedger,
   wireLedger,
   updateTaskState,
   wireRelationship,

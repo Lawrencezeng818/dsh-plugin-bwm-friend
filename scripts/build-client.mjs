@@ -26,6 +26,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INLINE_MODULES } from './inline-modules.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
@@ -43,12 +44,7 @@ const body = stripHeader(src).replace(/\r\n/g, '\n').replace(/\n+$/, '');
 //   客户端半加载即抛错；已提交的旧产物只是"构建于该提交之前"才侥幸可用（即产物落后于源）。
 //   现改为「内联模块按依赖顺序注册」：内核的兄弟依赖与内核自身一同内联，
 //   且 __bwmRequire 必须在任何内联模块执行之前定义（内核顶层 require 立即求值）。
-const RUNTIME_SRC_DIR = resolve(root, 'packages', 'bwm-runtime-core', 'src');
-const INLINE_MODULES = [
-  // 顺序 = 依赖顺序：被依赖者先注册（内核顶层立即 require 其依赖）
-  { id: './perception-router.js', entry: resolve(RUNTIME_SRC_DIR, 'perception-router.js') },
-  { id: '@laikaton/bwm-runtime-core', entry: resolve(RUNTIME_SRC_DIR, 'index.js') },
-];
+// 内联模块清单已抽至 ./inline-modules.mjs（单一来源）：构建侧与 parity 校验侧共用，防两处不同步。
 
 // 读入各内联模块源码，并把「指向兄弟内联模块的 require」改写为 __bwmRequire
 const inlined = INLINE_MODULES.map(({ id: modId, entry }) => {

@@ -18,14 +18,14 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INLINE_MODULES } from '../scripts/inline-modules.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUNDLE = resolve(root, 'lib', 'client.js');
 
-const INLINE_MODULES = [
-  { id: './perception-router.js', entry: resolve(root, 'packages', 'bwm-runtime-core', 'src', 'perception-router.js') },
-  { id: '@laikaton/bwm-runtime-core', entry: resolve(root, 'packages', 'bwm-runtime-core', 'src', 'index.js') },
-];
+// 内联模块清单由 ../scripts/inline-modules.mjs 提供（单一来源，与构建侧共用）。
+// 2026-09-14：此前该列表在本文件与构建脚本各维护一份，内核新增兄弟依赖时漏改一侧会产出假 FAIL，
+//   现抽为单一来源。
 
 const failures = [];
 const check = (cond, label, detail = '') => {
@@ -107,6 +107,9 @@ for (const [label, needle] of [
   ['关系事件接线（专利1 [0071]）', 'wireRelationship(bus, context)'],
   ['域计数单一来源', 'domains: CONTEXT_DOMAINS.length'],
   ['感知路由器（专利5）', '__bwmModules["./perception-router.js"]'],
+  ['关系账本（专利4）', '__bwmModules["./relationship-ledger.js"]'],
+  ['关系账本六步桥接', 'bridgePerceptionToLedger'],
+  ['确定性增量规则表', 'rules-v1.0'],
 ]) {
   check(bundleText.includes(needle), `产物含实现特征：${label}`);
 }
