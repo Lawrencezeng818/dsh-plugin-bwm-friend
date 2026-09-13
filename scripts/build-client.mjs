@@ -37,7 +37,28 @@ const body = stripHeader(src).replace(/\r\n/g, '\n').replace(/\n+$/, '');
 // P1.1：内联注入 @laikaton/bwm-runtime-core（物理隔离 + 运行时自包含）
 // Shell 源码 `require('@laikaton/bwm-runtime-core')` → build 时解析为内联模块；
 // 未来 runtime 服务化/真依赖时，Shell 源码无需改动（__bwmRequire 换解析目标）。
-const runtimeSrc = readFileSync(resolve(root, 'packages', 'bwm-runtime-core', 'src', 'index.js'), 'utf8');
+//
+// 2026-09-13 修复（F4）：内核自 v0.7.0 起在顶层 require 其兄弟模块 './perception-router.js'，
+//   而本脚本原只内联 index.js 单文件 —— 重建产物执行到该 require 时解析不到（浏览器无此模块），
+//   客户端半加载即抛错；已提交的旧产物只是"构建于该提交之前"才侥幸可用（即产物落后于源）。
+//   现改为「内联模块按依赖顺序注册」：内核的兄弟依赖与内核自身一同内联，
+//   且 __bwmRequire 必须在任何内联模块执行之前定义（内核顶层 require 立即求值）。
+const RUNTIME_SRC_DIR = resolve(root, 'packages', 'bwm-runtime-core', 'src');
+const INLINE_MODULES = [
+  // 顺序 = 依赖顺序：被依赖者先注册（内核顶层立即 require 其依赖）
+  { id: './perception-router.js', entry: resolve(RUNTIME_SRC_DIR, 'perception-router.js') },
+  { id: '@laikaton/bwm-runtime-core', entry: resolve(RUNTIME_SRC_DIR, 'index.js') },
+];
+
+// 读入各内联模块源码，并把「指向兄弟内联模块的 require」改写为 __bwmRequire
+const inlined = INLINE_MODULES.map(({ id: modId, entry }) => {
+  let code = readFileSync(entry, 'utf8');
+  for (const dep of INLINE_MODULES) {
+    code = code.replaceAll(`require('${dep.id}')`, `__bwmRequire('${dep.id}')`);
+  }
+  return { id: modId, code };
+});
+
 const bodyWithRuntime = body.replaceAll(
   "require('@laikaton/bwm-runtime-core')",
   "__bwmRequire('@laikaton/bwm-runtime-core')"
@@ -50,22 +71,26 @@ const outline = [
   '\t\tvar module = { exports: {} };',
   '\t\tvar exports = module.exports;',
   '\t\tObject.defineProperty(exports, Symbol.toStringTag, { value: "Module" });',
-  // ── runtime-core 内联模块注册表（P1.1）──
+  // ── 内联模块注册表（P1.1 内核；2026-09-13 F4 扩展至内核的兄弟依赖）──
   "\t\tvar __bwmModules = {};",
-  "\t\t__bwmModules['@laikaton/bwm-runtime-core'] = (function() {",
-  '\t\t\tvar module = { exports: {} };',
-  '\t\t\tvar exports = module.exports;',
+  // __bwmRequire 先于任何内联模块定义：内联模块顶层可能立即 require 其兄弟模块
+  "\t\tvar __bwmRequire = function(name) { return __bwmModules[name] || require(name); };",
 ];
 
-// runtime 源码按三 tab 缩进
-const runtimeIndented = runtimeSrc
-  .split('\n')
-  .map((line) => (line.trim() === '' ? '' : '\t\t\t' + line))
-  .join('\n');
-outline.push(runtimeIndented);
-outline.push('\t\t\treturn module.exports;');
-outline.push('\t\t})();');
-outline.push("\t\tvar __bwmRequire = function(name) { return __bwmModules[name] || require(name); };");
+// 逐个注册内联模块（注册即执行；依赖顺序由 INLINE_MODULES 保证）
+for (const { id: modId, code } of inlined) {
+  outline.push(`\t\t__bwmModules[${JSON.stringify(modId)}] = (function() {`);
+  outline.push('\t\t\tvar module = { exports: {} };');
+  outline.push('\t\t\tvar exports = module.exports;');
+  outline.push(
+    code
+      .split('\n')
+      .map((line) => (line.trim() === '' ? '' : '\t\t\t' + line))
+      .join('\n')
+  );
+  outline.push('\t\t\treturn module.exports;');
+  outline.push('\t\t})();');
+}
 
 // ── client body（require 已替换为 __bwmRequire）──
 const indented = bodyWithRuntime

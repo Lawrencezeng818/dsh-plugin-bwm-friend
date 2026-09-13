@@ -87,13 +87,48 @@ function createEventBus() {
   };
 }
 
+/* ── 关系域策略（专利1 说明书 [0041]/[0071]）──
+ * [0041] 关系域至少包括「关系状态」字段与「亲密度」字段；由交互行为事件驱动更新，结果各视图共享。
+ * [0071] 交互行为产生行为事件 → 事件写入时间线域 → 触发关系域更新 → 经订阅通知广播至各视图。
+ * 阈值表把亲密度映射为关系状态阶段；决策私有（阈值/增益不外泄为协议面）。
+ */
+const RELATIONSHIP_STAGES = Object.freeze(['new', 'acquaintance', 'familiar', 'close', 'bonded']);
+const RELATIONSHIP_POLICY = Object.freeze({
+  stage: 'new',       // 初始关系状态（当前阶段）
+  intimacy: 0,        // 初始亲密度（当前程度）
+  max: 100,
+  thresholds: Object.freeze([0, 10, 30, 60, 90]), // 升序；与 RELATIONSHIP_STAGES 等长
+});
+
+/* ── 上下文域清单：单一来源（消除计数漂移）──
+ * 历史缺陷：context-govern 能力约束里写死 `domains: 8`，而 2026-08-24 引入 capability 域后
+ * 实际域数已为 9；说明书侧也曾出现"包括八个域"却紧接着列举九项。计数分散在多处 = 必然漂移。
+ * 现由本清单唯一推导：createAgentContext 初值、context-govern 的 domains 计数、测试断言均引用
+ * CONTEXT_DOMAINS。新增域只需在本表加一行。
+ * 与专利1 说明书 [0039]–[0047] 的九个域一一同名；capability 为实现内部域
+ * （权利要求用"至少包括"表述，不构成支持性缺陷）。
+ */
+const CONTEXT_DOMAIN_INIT = Object.freeze({
+  identity: {},
+  personality: {},
+  relationship: { stage: RELATIONSHIP_POLICY.stage, intimacy: RELATIONSHIP_POLICY.intimacy, updatedAt: null, lastReason: null },
+  memory: {},
+  conversation: {},
+  tasks: {},
+  preferences: {},
+  timeline: [],
+  presence: { state: 'idle' },
+  capability: { available: [], dynamic: true },
+});
+const CONTEXT_DOMAINS = Object.freeze(Object.keys(CONTEXT_DOMAIN_INIT));
+
 /* ── Capability Layer（P1.3：能力协商——多宿主降级运行，接近 Agent Plugin ABI）──
  * 能力结构 { name, version, level, constraints }（评审 R5：不只"有没有"，还要版本/等级/约束）
  * 协议公开（capability 列表+协商格式）；决策私有（降级策略阈值在 Runtime 内部）
  */
 const RUNTIME_CAPABILITIES = [
   { name: 'presence-provide', version: '1.0', level: 'full', constraints: { presence: 9, modes: 3 } },
-  { name: 'context-govern',   version: '1.0', level: 'full', constraints: { domains: 8, writable: 'ownership-model' } },
+  { name: 'context-govern',   version: '1.0', level: 'full', constraints: { domains: CONTEXT_DOMAINS.length, writable: 'ownership-model' } },
   { name: 'ledger-record',    version: '1.0', level: 'full', constraints: { entries: 'append-only', retention: 500 } },
   { name: 'identity-hold',    version: '1.0', level: 'basic', constraints: { persona: 'mira' } },
   { name: 'evolution-run',    version: '1.0', level: 'basic', constraints: { algorithm: 'proprietary' } },
@@ -154,6 +189,7 @@ function negotiate(requires = [], runtimeCaps = RUNTIME_CAPABILITIES) {
 const DOMAIN_POLICY = Object.freeze({
   identity: 'persist',      // 静态：我是谁
   personality: 'persist',   // 配置：人格特征
+  relationship: 'persist',  // 长期：关系状态与亲密度（跨重启必须保持；非高频运行态）
   memory: 'persist',        // 长期：用户记忆
   preferences: 'persist',   // 配置：用户偏好
   conversation: 'persist',  // 历史：会话数据（可选，暂落盘）
@@ -166,10 +202,13 @@ const PERSIST_DOMAINS = Object.entries(DOMAIN_POLICY)
   .filter(([, p]) => p === 'persist')
   .map(([d]) => d);
 
-/* ── Context Runtime（P1.2/P1.4：8 域共享上下文 + ownership 治理 + 版本迁移）──
+/* ── Context Runtime（P1.2/P1.4：共享上下文 + ownership 治理 + 版本迁移）──
  * 从 src/client.js 原样搬移（2026-08-24 P1.4）——自此 Context 归 Runtime，Shell 只读/订阅。
+ * 域数与域清单以 CONTEXT_DOMAINS 为唯一来源（不在此处硬写计数）。
  * ownership 模型 v1（docs/BWM-CONTEXT-CONTRACT-v1.md）：
- *   runtime 域（Shell 只读）：identity/personality/memory/preferences/timeline/presence/capability
+ *   runtime 域（Shell 只读）：identity/personality/relationship/memory/preferences/timeline/presence/capability
+ *     ——relationship 归 runtime：权1 要求各视图「读取到同一智能体状态」，
+ *       关系状态由行为事件驱动（说明书 [0071]）而非视图直写，故 Shell 无写权。
  *   shared 域（双方可写）：conversation/tasks（业务数据）
  */
 const CONTEXT_SCHEMA_VERSION = '1.0';
@@ -177,24 +216,16 @@ const CONTEXT_VERSIONS = { '0.9': '1.0' }; // 版本链（Additive-only；迁移
 const CONTEXT_MIGRATIONS = {
   // '0.9': (ctx) => { ... }  未来版本迁移在此登记
 };
-const CONTEXT_RUNTIME_DOMAINS = new Set(['identity', 'personality', 'memory', 'preferences', 'timeline', 'presence', 'capability']);
+const CONTEXT_RUNTIME_DOMAINS = new Set(['identity', 'personality', 'relationship', 'memory', 'preferences', 'timeline', 'presence', 'capability']);
 const CONTEXT_ERRORS = Object.freeze({
   INVALID_DOMAIN: 'CONTEXT_INVALID_DOMAIN',
   PERMISSION_DENIED: 'CONTEXT_PERMISSION_DENIED',
 });
 
 function createAgentContext() {
-  const domains = {
-    identity: {},
-    personality: {},
-    memory: {},
-    conversation: {},
-    tasks: {},
-    preferences: {},
-    timeline: [],
-    presence: { state: 'idle' },
-    capability: { available: [], dynamic: true },
-  };
+  // 初值由 CONTEXT_DOMAIN_INIT 单一推导（深拷贝：避免多实例共享嵌套引用）
+  const domains = {};
+  for (const name of CONTEXT_DOMAINS) domains[name] = JSON.parse(JSON.stringify(CONTEXT_DOMAIN_INIT[name]));
   const watchers = new Set();
   let schemaVersion = CONTEXT_SCHEMA_VERSION;
   const migrate = (from) => {
@@ -303,6 +334,75 @@ function wireLedger(bus, context, opts = {}) {
   return () => off.forEach((d) => d());
 }
 
+/* ── Relationship Runtime（专利1 [0041]/[0071]：关系域由行为事件驱动更新）──
+ * 链路（[0071] 逐字对应）：
+ *   交互行为 → 行为事件（agent.task.success 等）→ 事件写入时间线域（wireLedger）
+ *            → 触发关系域更新（本函数）→ 经订阅通知机制广播至已订阅的各视图
+ * 写权归属 Runtime：CONTEXT_RUNTIME_DOMAINS 含 relationship，视图 shellSet 被拒——
+ *   与权1「各视图读取到同一智能体状态」一致（视图是消费者，不是关系状态的写入者）。
+ * 合并写而非整体替换：F2 教训——wireLedger 曾以整体替换写 tasks，抹掉既有字段；
+ *   关系域字段可扩展（[0048]），必须保留既有字段。
+ * 载荷兼容（专利4 关系语义前向兼容）：relationship_delta 可为数字，或 { delta | intimacy | stage }。
+ */
+const RELATIONSHIP_SIGNALS = Object.freeze({
+  'agent.task.success': { gain: 1, reason: 'task_success' },
+  'memory.updated':     { gain: 1, reason: 'memory_persisted' },
+  'agent.task.failed':  { gain: 0, reason: 'task_failed' }, // 失败不减：不做负反馈惩罚
+});
+
+function relationshipStageOf(intimacy, thresholds = RELATIONSHIP_POLICY.thresholds) {
+  let stage = RELATIONSHIP_STAGES[0];
+  for (let i = 0; i < thresholds.length; i++) if (intimacy >= thresholds[i]) stage = RELATIONSHIP_STAGES[i];
+  return stage;
+}
+
+// 解析载荷声明的增量 → { delta, stage }（非法/缺失一律回落到信号默认增益，不抛错）
+function resolveRelationshipDelta(raw, fallbackGain, prev) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return { delta: raw, stage: null };
+  if (raw && typeof raw === 'object') {
+    let delta = Number.isFinite(raw.delta) ? raw.delta : fallbackGain;
+    if (!Number.isFinite(raw.delta) && Number.isFinite(raw.intimacy)) {
+      const base = Number.isFinite(prev.intimacy) ? prev.intimacy : RELATIONSHIP_POLICY.intimacy;
+      delta = raw.intimacy - base; // 显式目标值 → 差值
+    }
+    const stage = typeof raw.stage === 'string' && RELATIONSHIP_STAGES.includes(raw.stage) ? raw.stage : null;
+    return { delta, stage };
+  }
+  return { delta: fallbackGain, stage: null };
+}
+
+function applyRelationshipSignal(context, { delta = 0, reason = null, stage = null, at = null } = {}) {
+  const prev = { ...(context.get('relationship') || {}) };
+  const base = Number.isFinite(prev.intimacy) ? prev.intimacy : RELATIONSHIP_POLICY.intimacy;
+  const stepped = Math.max(0, Math.min(RELATIONSHIP_POLICY.max, base + (Number(delta) || 0)));
+  const nextStage = stage || relationshipStageOf(stepped);
+  context.set('relationship', {
+    ...prev,                                   // 保留既有/扩展字段
+    stage: nextStage,
+    intimacy: stepped,
+    updatedAt: at || new Date().toISOString(),
+    lastReason: reason || prev.lastReason || null,
+  });
+  return context.get('relationship');
+}
+
+function wireRelationship(bus, context) {
+  const off = Object.entries(RELATIONSHIP_SIGNALS).map(([channel, sig]) =>
+    bus.on(channel, (payload) => {
+      const prev = { ...(context.get('relationship') || {}) };
+      const { delta, stage } = resolveRelationshipDelta(payload && payload.relationship_delta, sig.gain, prev);
+      const next = applyRelationshipSignal(context, { delta, reason: sig.reason, stage });
+      const changed = prev.stage !== next.stage || prev.intimacy !== next.intimacy;
+      // [0071] 更新结果经订阅通知机制广播 → 各视图据此对齐，避免出现不同视图显示不同关系状态
+      bus.emit('relationship:changed', {
+        stage: next.stage, intimacy: next.intimacy, reason: next.lastReason, changed,
+        prevStage: prev.stage, prevIntimacy: prev.intimacy,
+      });
+    })
+  );
+  return () => off.forEach((d) => d());
+}
+
 /* ── Presence 状态机（P1.4：事件 → presence 状态，纯逻辑无 DOM）──
  * Shell 渲染层订阅 bus 'presence:state'（或 context.watch('presence')）应用视觉
  */
@@ -405,6 +505,7 @@ function createRuntime(opts = {}) {
   context.set('personality', { ...PERSONALITY_PRESET });     // 人格特征
   // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2/专利4 实施例）
   wireLedger(bus, context, opts.ledger ? { store: opts.ledger } : {});   // Ledger Runtime（事件 → timeline/tasks）
+  wireRelationship(bus, context);      // Relationship Runtime（行为事件 → 关系状态/亲密度；专利1 [0071]）
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
   createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
   let handshake = null;
@@ -455,9 +556,17 @@ module.exports = {
   createPresenceMachine,
   createRequestMachine,
   wireLedger,
+  wireRelationship,
+  RELATIONSHIP_STAGES,
+  RELATIONSHIP_POLICY,
+  RELATIONSHIP_SIGNALS,
+  relationshipStageOf,
+  applyRelationshipSignal,
   EVENT_VERSIONS,
   CONTEXT_VERSIONS,
   CONTEXT_ERRORS,
+  CONTEXT_DOMAINS,
+  CONTEXT_DOMAIN_INIT,
   DOMAIN_POLICY,
   PERSIST_DOMAINS,
   REQUEST_STATES,

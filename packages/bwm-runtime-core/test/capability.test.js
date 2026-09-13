@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { negotiate, compareVersion, createRuntime, RUNTIME_CAPABILITIES } = require('../src/index.js');
+const { negotiate, compareVersion, createRuntime, RUNTIME_CAPABILITIES, CONTEXT_DOMAINS } = require('../src/index.js');
 
 // Shell 声明（与 docs/BWM-PROTOCOL-v1.md §4.1 对齐的 5 能力，结构化）
 const SHELL_CAPS = [
@@ -48,7 +48,9 @@ test('negotiate: 版本兼容（shell 要 1.0，runtime 给 1.2）→ matched + 
   assert.strictEqual(r.mode, 'full');
   assert.strictEqual(r.matched.length, 1);
   assert.strictEqual(r.matched[0].level, 'full');
-  assert.deepStrictEqual(r.matched[0].constraints, { domains: 8, writable: 'ownership-model' });
+  // 域计数自 2026-09-13 起由 CONTEXT_DOMAINS 唯一推导（此前硬写 8，与实际域数漂移）
+  assert.strictEqual(CONTEXT_DOMAINS.length, 10, '域清单 = 专利1 说明书九域 + capability 实现内部域');
+  assert.deepStrictEqual(r.matched[0].constraints, { domains: CONTEXT_DOMAINS.length, writable: 'ownership-model' });
 });
 
 test('negotiate: 字符串简写能力（旧协议兼容）→ 默认 version 1.0', () => {
