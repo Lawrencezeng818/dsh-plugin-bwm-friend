@@ -7,7 +7,7 @@ const {
   evidenceFactorOf,
 } = require('../src/relationship-ledger.js');
 
-/* ── 专利4 权1 六步机制链：契约证据（非界面测试）── */
+/* ── 专利4 权1 七步机制链：契约证据（非界面测试）── */
 
 const DAY = 86400000;
 
@@ -24,7 +24,7 @@ function setup(extra = {}) {
 
 /* ── 步骤一：候选事件获取 ── */
 
-test('步骤一：候选事件含事件标识/类型/摘要/上下文引用/在场状态，缺省由运行侧写入', () => {
+test('步骤一：候选事件含全链路事件标识/类型/摘要/上下文引用/在场状态，缺省由运行侧写入', () => {
   const { ledger } = setup();
   const e = ledger.submitCandidate({
     eventType: 'generated_template',
@@ -39,6 +39,15 @@ test('步骤一：候选事件含事件标识/类型/摘要/上下文引用/在�
   assert.strictEqual(e.evidenceSource, 'runtime', '行为事件由智能体运行侧写入');
 });
 
+test('步骤一：候选事件区分事件发生时间与处理时间两个字段', () => {
+  const { ledger, clock } = setup();
+  clock.set(1000);
+  const e = ledger.submitCandidate({ eventType: 'companion_chat', eventTime: 500 });
+  assert.strictEqual(e.eventTime, 500, '事件发生时间可显式给定');
+  assert.strictEqual(e.processTime, 1000, '处理时间为运行侧接收时刻');
+  assert.strictEqual(e.at, 500, 'at 与 eventTime 保持一致（兼容别名）');
+});
+
 test('步骤一：未显式给出事件标识时自动生成，且互不重复', () => {
   const { ledger } = setup();
   const a = ledger.submitCandidate({ eventType: 'companion_chat' });
@@ -46,7 +55,7 @@ test('步骤一：未显式给出事件标识时自动生成，且互不重复',
   assert.notStrictEqual(a.eventId, b.eventId);
 });
 
-/* ── 步骤二：准入判断 ── */
+/* ── 步骤二：多策略准入 ── */
 
 test('步骤二：置信度低于阈值 → 不准入', () => {
   const { ledger } = setup();
@@ -64,7 +73,7 @@ test('步骤二：显著性低于阈值 → 不准入', () => {
   assert.ok(a.reasons.indexOf('below_salience_gate') >= 0);
 });
 
-test('步骤二：隐私策略不允许 → 不准入', () => {
+test('步骤二：隐私策略不允许 → 不准入（隐私门控为必要条件）', () => {
   const { ledger } = setup();
   const e = ledger.submitCandidate({ eventType: 'companion_chat', salience: 8, privacyAllowed: false });
   const a = ledger.admit(e);
@@ -79,6 +88,22 @@ test('步骤二：三项门控全过 → 获准，且记录准入策略版本', 
   assert.strictEqual(a.ok, true);
   assert.deepStrictEqual(a.reasons, ['admitted']);
   assert.match(a.policyVersion, /^admission-s/);
+});
+
+test('步骤二：未知证据来源 → 拒绝准入（不默认按最高置信度放行）', () => {
+  const { ledger } = setup();
+  const e = ledger.submitCandidate({ eventType: 'tool_execution', salience: 8, confidence: 0.9, evidenceSource: 'mystery_feed' });
+  const a = ledger.admit(e);
+  assert.strictEqual(a.ok, false);
+  assert.ok(a.reasons.indexOf(LEDGER_ERRORS.UNKNOWN_EVIDENCE_SOURCE) >= 0, '未知来源须显式拒绝');
+});
+
+test('步骤二：未知证据来源可配置为显式降级（降级系数生效，非按最高置信度放行）', () => {
+  const { ledger } = setup({ unknownEvidencePolicy: 'degrade' });
+  const e = ledger.submitCandidate({ eventType: 'tool_execution', salience: 8, confidence: 0.9, evidenceSource: 'mystery_feed' });
+  const a = ledger.admit(e);
+  assert.strictEqual(a.ok, true, '降级策略下放行');
+  assert.strictEqual(a.evidencePolicy, 'degrade');
 });
 
 /* ── 步骤三：绑定与溯源 ── */
@@ -107,7 +132,7 @@ test('步骤三：绑定成功 → 产出主体标识、关系范围、证据来
   assert.strictEqual(b.subjectId, 'u_1');
   assert.strictEqual(b.relationScope, 'u_1');
   assert.strictEqual(b.evidenceSource, 'runtime');
-  assert.strictEqual(b.provenance.at, e.at);
+  assert.strictEqual(b.provenance.eventTime, e.eventTime);
   assert.strictEqual(b.provenance.basis, 'admission_passed');
   assert.strictEqual(b.provenance.sessionRef, 'sess_7');
 });
@@ -122,20 +147,34 @@ test('步骤四：快照含用户目标/行为摘要/结果状态，结果状态
   assert.strictEqual(s2.outcome, 'cancelled');
 });
 
-/* ── 步骤五：确定性增量计算 ── */
+test('步骤四：快照可泛化为事件上下文（感知类事件的目标/行为可为空）', () => {
+  const { ledger } = setup();
+  const s = ledger.attachSnapshot({ contextKind: 'perception', actionSummary: '检测到用户在座' });
+  assert.strictEqual(s.userGoal, null);
+  assert.strictEqual(s.contextKind, 'perception');
+});
 
-test('步骤五：增量 = 事件类型权重 × 结果系数 × 置信度系数（按维度分配）', () => {
+/* ── 步骤五：初始关系增量 Δ0（不含时间衰减）── */
+
+test('步骤五：Δ0 = 事件类型权重 × 结果系数 × 置信度系数（按维度分配），不含时间衰减', () => {
   const { ledger } = setup();
   const e = ledger.submitCandidate({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 });
   const b = ledger.bind(e, { subjectId: 'u_1' });
   const snap = ledger.attachSnapshot({ outcome: 'completed' });
-  const d = ledger.computeDelta(e, b, snap, 0);
+  const d = ledger.computeInitialDelta(e, b, snap);
   assert.strictEqual(d.ok, true);
   // 1.0 × 1.0 × 1.0 = 1.0；trust 分配 0.5
   assert.strictEqual(d.factors.base, 1);
   assert.ok(Math.abs(d.delta.trust - 0.5) < 1e-9, 'trust 应为 0.5');
   assert.ok(Math.abs(d.delta.intimacy - 0.4) < 1e-9, 'intimacy 应为 0.4');
   assert.ok(Math.abs(d.delta.familiarity - 0.3) < 1e-9, 'familiarity 应为 0.3');
+  assert.deepStrictEqual(d.normalizedInput, {
+    eventType: 'generated_template',
+    outcome: 'completed',
+    evidenceSource: 'runtime',
+    salience: 9,
+    userConfirmed: false,
+  }, 'Δ0 计算的全部输入须固化为规范化输入');
 });
 
 test('步骤五：事件类型权重差异生效（mode_switch 远低于 generated_template）', () => {
@@ -143,7 +182,7 @@ test('步骤五：事件类型权重差异生效（mode_switch 远低于 generat
   const mk = (type) => {
     const e = ledger.submitCandidate({ eventType: type, salience: 9, confidence: 1, at: 0 });
     const b = ledger.bind(e, { subjectId: 'u_1' });
-    return ledger.computeDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }), 0);
+    return ledger.computeInitialDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }));
   };
   const hi = mk('generated_template');
   const lo = mk('mode_switch');
@@ -151,19 +190,22 @@ test('步骤五：事件类型权重差异生效（mode_switch 远低于 generat
   assert.ok(Math.abs(lo.factors.weight - 0.2) < 1e-9);
 });
 
-test('步骤五：结果状态系数生效（completed > partial > cancelled）', () => {
+test('步骤五：结果状态系数生效（completed > partial > cancelled > failed=0）', () => {
   const { ledger } = setup();
   const mk = (outcome) => {
     const e = ledger.submitCandidate({ eventType: 'code_analysis', salience: 9, confidence: 1, at: 0 });
     const b = ledger.bind(e, { subjectId: 'u_1' });
-    return ledger.computeDelta(e, b, ledger.attachSnapshot({ outcome }), 0);
+    return ledger.computeInitialDelta(e, b, ledger.attachSnapshot({ outcome }));
   };
   const c = mk('completed').factors.base;
   const p = mk('partial').factors.base;
   const x = mk('cancelled').factors.base;
+  const f = mk('failed');
   assert.ok(c > p && p > x, '完成 > 完成含失败段 > 取消');
   assert.ok(Math.abs(p / c - 0.7) < 1e-9);
   assert.ok(Math.abs(x / c - 0.2) < 1e-9);
+  assert.strictEqual(f.ok, true, 'failed 为已定义枚举，须可计算而非"未知结果状态"');
+  assert.strictEqual(f.factors.base, 0, '失败事件的增量口径：0（不因失败惩罚关系，也不产生正向增量）');
 });
 
 test('步骤五：证据置信度系数生效（运行侧 1.0 / 用户确认 0.9 / 感知派生=显著性÷10）', () => {
@@ -172,42 +214,34 @@ test('步骤五：证据置信度系数生效（运行侧 1.0 / 用户确认 0.9
   assert.strictEqual(evidenceFactorOf({ salience: 0 }, 'runtime', rules), 1.0);
   assert.strictEqual(evidenceFactorOf({ salience: 0, userConfirmed: true }, 'runtime', rules), 0.9);
   assert.strictEqual(evidenceFactorOf({ salience: 8 }, 'perception', rules), 0.8);
+  assert.strictEqual(evidenceFactorOf({ salience: 8 }, 'mystery', rules), null, '未知来源返回 null 而非默认 1.0');
 
   const e = ledger.submitCandidate({ eventType: 'companion_chat', salience: 8, confidence: 1, at: 0, userConfirmed: true });
   const b = ledger.bind(e, { subjectId: 'u_1' });
-  const d = ledger.computeDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }), 0);
+  const d = ledger.computeInitialDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }));
   assert.ok(Math.abs(d.factors.confidenceFactor - 0.9) < 1e-9);
 });
 
-test('步骤五：时间衰减生效（Δ(t)=Δ₀·e^(−λ·Δdays)）', () => {
-  const { ledger } = setup();
-  const e = ledger.submitCandidate({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 });
-  const b = ledger.bind(e, { subjectId: 'u_1' });
-  const snap = ledger.attachSnapshot({ outcome: 'completed' });
-  const fresh = ledger.computeDelta(e, b, snap, 0);
-  const aged = ledger.computeDelta(e, b, snap, 1000 * DAY);
-  assert.ok(Math.abs(aged.delta.trust / fresh.delta.trust - Math.exp(-0.002 * 1000)) < 1e-6, 'trust 衰减率 0.002/天');
-  assert.ok(Math.abs(aged.delta.intimacy / fresh.delta.intimacy - Math.exp(-0.001 * 1000)) < 1e-6, '亲密度衰减更慢');
-  assert.ok(aged.delta.intimacy / fresh.delta.intimacy > aged.delta.trust / fresh.delta.trust, '亲密度衰减应慢于信任度');
-});
-
-test('步骤五：未知事件类型 / 未知结果状态 → 计算失败（不静默取零）', () => {
+test('步骤五：未知事件类型 / 未知结果状态 / 未知规则版本 → 计算失败（不静默取零）', () => {
   const { ledger } = setup();
   const e = ledger.submitCandidate({ eventType: 'nope', salience: 9, confidence: 1, at: 0 });
   const b = ledger.bind(e, { subjectId: 'u_1' });
-  const d = ledger.computeDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }), 0);
+  const d = ledger.computeInitialDelta(e, b, ledger.attachSnapshot({ outcome: 'completed' }));
   assert.strictEqual(d.ok, false);
   assert.strictEqual(d.error, LEDGER_ERRORS.UNKNOWN_EVENT_TYPE);
   const e2 = ledger.submitCandidate({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 0 });
   const b2 = ledger.bind(e2, { subjectId: 'u_1' });
-  const d2 = ledger.computeDelta(e2, b2, ledger.attachSnapshot({ outcome: 'weird' }), 0);
+  const d2 = ledger.computeInitialDelta(e2, b2, ledger.attachSnapshot({ outcome: 'weird' }));
   assert.strictEqual(d2.ok, false);
   assert.strictEqual(d2.error, LEDGER_ERRORS.UNKNOWN_OUTCOME);
+  const d3 = ledger.computeInitialDelta(e2, b2, ledger.attachSnapshot({ outcome: 'completed' }), 'rules-v9.9');
+  assert.strictEqual(d3.ok, false);
+  assert.strictEqual(d3.error, LEDGER_ERRORS.UNKNOWN_RULE_VERSION);
 });
 
-/* ── 步骤六：账本写入（幂等 + 规则版本）── */
+/* ── 步骤六：原子幂等追加 ── */
 
-test('步骤六：submit 六步一次走通，账本条目含共享事件标识/溯源/快照/准入依据/规则版本/增量', () => {
+test('步骤六：submit 七步一次走通，账本条目含全链路事件标识/溯源/快照/准入依据/规则版本/规范化输入/Δ0', () => {
   const { ledger } = setup();
   const r = ledger.submit(
     { eventType: 'generated_template', summary: '生成发布方案', contextRef: 'sess_1', presenceState: 'focused', salience: 9, confidence: 1 },
@@ -222,14 +256,16 @@ test('步骤六：submit 六步一次走通，账本条目含共享事件标识/
   assert.strictEqual(e.eventType, 'generated_template');
   assert.strictEqual(e.evidenceSource, 'runtime');
   assert.strictEqual(e.provenance.basis, 'admission_passed');
-  assert.deepStrictEqual(e.snapshot, { userGoal: '发布方案', actionSummary: '市场分析+PPT', outcome: 'completed' });
+  assert.deepStrictEqual(e.snapshot, { userGoal: '发布方案', actionSummary: '市场分析+PPT', outcome: 'completed', contextKind: 'task' });
   assert.strictEqual(e.admission.ok, true);
   assert.strictEqual(e.rulesVersion, 'rules-v1.0');
   assert.ok(e.delta.trust > 0);
+  assert.ok(e.normalizedInput, '条目须固化规范化输入');
+  assert.ok(e.eventTime != null && e.processTime != null && e.ledgerTime != null, '三时间字段齐备');
   assert.strictEqual(ledger.size(), 1);
 });
 
-test('步骤六：同一共享事件标识重复写入 → 幂等，不重复计算', () => {
+test('步骤六：同一全链路事件标识重复写入 → 幂等，不重复计算', () => {
   const { ledger } = setup();
   const raw = { eventId: 'shared_evt_1', eventType: 'code_analysis', salience: 9, confidence: 1 };
   const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
@@ -253,18 +289,74 @@ test('步骤六：写入阶段失败时可分别定位（准入失败不落账�
   assert.strictEqual(ledger.size(), 0, '未获准事件不得进入账本');
 });
 
-/* ── 重放（可验证 / 规则版本化）── */
+/* ── 步骤七：重算比较验证 ── */
 
-test('重放：账本可确定性重建，结果与顺次累加一致', () => {
+test('验证：未改动账本 → 重算比较全部一致', () => {
   const { ledger } = setup();
-  const ctx = (subjectId) => ({ binding: { subjectId }, snapshot: { outcome: 'completed' } });
-  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx('u_1'));
-  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 1000 }, ctx('u_1'));
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx);
+  ledger.submit({ eventType: 'code_analysis', salience: 7, confidence: 0.9, at: 1000 }, ctx);
+  const v = ledger.verify();
+  assert.strictEqual(v.ok, true);
+  assert.strictEqual(v.checked, 2);
+  assert.deepStrictEqual(v.mismatches, []);
+});
+
+test('验证：条目 Δ0 被篡改 → 重算比较检出不一致（含维度与数值）', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx);
+  const entry = ledger.all()[0];
+  entry.delta.trust = 0.99;   // 模拟账本被改写
+  const v = ledger.verify();
+  assert.strictEqual(v.ok, false);
+  assert.strictEqual(v.mismatches.length, 1);
+  assert.strictEqual(v.mismatches[0].dimension, 'trust');
+  assert.ok(Math.abs(v.mismatches[0].expected - 0.5) < 1e-9);
+  assert.strictEqual(v.mismatches[0].actual, 0.99);
+});
+
+test('验证：规则版本缺失 → 明确失败，不静默跳过', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 0 }, ctx);
+  ledger.all()[0].rulesVersion = 'rules-v0.0';
+  const v = ledger.verify();
+  assert.strictEqual(v.ok, false);
+  assert.strictEqual(v.mismatches[0].reason, LEDGER_ERRORS.UNKNOWN_RULE_VERSION);
+});
+
+/* ── 步骤七：指定评价时刻重放（两层量）── */
+
+test('重放：评价时刻为空 → 等价于按初始增量 Δ0 顺次累加', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx);
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 1000 }, ctx);
   const rep = ledger.replay();
+  assert.strictEqual(rep.ok, true);
   assert.strictEqual(rep.steps.length, 2);
-  const expectTrust = rep.steps[0].step.trust + rep.steps[1].step.trust;
+  const expectTrust = rep.steps[0].effective.trust + rep.steps[1].effective.trust;
   assert.ok(Math.abs(rep.state.trust - expectTrust) < 1e-9);
   assert.deepStrictEqual(Object.keys(rep.steps[0].state), ['trust', 'intimacy', 'familiarity']);
+});
+
+test('重放：同一评价时刻重复重放结果一致；改变评价时刻只改有效贡献，不改 Δ0', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx);
+
+  const a1 = ledger.replay({ at: 10 * DAY });
+  const a2 = ledger.replay({ at: 10 * DAY });
+  assert.deepStrictEqual(a1.state, a2.state, '同一评价时刻重复重放须一致');
+
+  const at100 = ledger.replay({ at: 100 * DAY });
+  assert.ok(at100.state.trust < a1.state.trust, '评价时刻越晚，有效贡献越低');
+
+  // Δ0 不随评价时刻变化
+  assert.strictEqual(ledger.all()[0].delta.trust, 0.5, 'Δ0 为不可变初始增量');
+  assert.ok(Math.abs(a1.steps[0].effective.trust - 0.5 * Math.exp(-0.002 * 10)) < 1e-9);
+  assert.ok(Math.abs(at100.steps[0].effective.trust - 0.5 * Math.exp(-0.002 * 100)) < 1e-9);
 });
 
 test('重放：按条目内记录的规则版本执行（规则升级后历史条目不重算）', () => {
@@ -275,7 +367,6 @@ test('重放：按条目内记录的规则版本执行（规则升级后历史�
   const registry = Object.assign({}, RULE_TABLES, { 'rules-v1.1': v11 });
   const { ledger } = setup({ rules: registry });
 
-  // 两条事件，分别以不同规则版本计算
   ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, {
     binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' }, rulesVersion: 'rules-v1.0',
   });
@@ -285,15 +376,40 @@ test('重放：按条目内记录的规则版本执行（规则升级后历史�
 
   const all = ledger.all();
   assert.deepStrictEqual(all.map((e) => e.rulesVersion), ['rules-v1.0', 'rules-v1.1']);
+  assert.strictEqual(all[0].delta.trust, all[1].delta.trust, 'Δ0 不因规则版本不同而改变（仅衰减率不同）');
 
   const rep = ledger.replay({ at: 100 * DAY });
-  // 由条目内版本决定衰减：v1.0 的 trust λ=0.002，v1.1 的 λ=0.02
-  assert.ok(Math.abs(rep.steps[0].step.trust - 0.5 * Math.exp(-0.002 * 100)) < 1e-9);
-  assert.ok(Math.abs(rep.steps[1].step.trust - 0.5 * Math.exp(-0.02 * 100)) < 1e-9);
-  assert.ok(rep.steps[1].step.trust < rep.steps[0].step.trust, '高衰减版本的有效值应更低');
+  assert.ok(Math.abs(rep.steps[0].effective.trust - 0.5 * Math.exp(-0.002 * 100)) < 1e-9);
+  assert.ok(Math.abs(rep.steps[1].effective.trust - 0.5 * Math.exp(-0.02 * 100)) < 1e-9);
+  assert.ok(rep.steps[1].effective.trust < rep.steps[0].effective.trust, '高衰减版本的有效值应更低');
 });
 
-/* ── 关系资产查询（权6）── */
+test('重放：迟到事件按事件发生时间排序，且更早发生者衰减更多', () => {
+  const { ledger, clock } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  clock.set(10_000);
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, eventTime: 9_000 }, ctx); // 先入账、发生较晚
+  const late = ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, eventTime: 1_000 }, ctx); // 迟到、发生较早
+  const earlyId = late.entry.eventId;
+
+  const rep = ledger.replay({ at: 20_000 });
+  assert.strictEqual(rep.steps.length, 2);
+  assert.strictEqual(rep.steps[0].eventId, earlyId, '重放顺序须按事件发生时间，而非入账先后');
+  assert.ok(rep.steps[0].effective.trust < rep.steps[1].effective.trust,
+    'Δ0 相同时，更早发生的事件在评价时刻的有效贡献更低（衰减更多）');
+});
+
+test('重放：规则版本缺失 → 明确失败，不返回静默错值', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 0 }, ctx);
+  ledger.all()[0].rulesVersion = 'rules-v0.0';
+  const rep = ledger.replay();
+  assert.strictEqual(rep.ok, false);
+  assert.strictEqual(rep.error, LEDGER_ERRORS.UNKNOWN_RULE_VERSION);
+});
+
+/* ── 关系资产查询（读模型）── */
 
 test('查询：按时间 / 事件类型 / 主题过滤，并给出各维度累计', () => {
   const { ledger } = setup();
@@ -328,28 +444,6 @@ test('查询：时间线按发生时刻升序输出（关系资产报告的时�
   assert.deepStrictEqual(rep.entries.map((e) => e.at), [1000, 5000]);
 });
 
-/* ── 持久层接线（可选注入）── */
-
-test('持久层：注入 store 时逐条 append；append 抛错不阻断账本写入', () => {
-  const appended = [];
-  let boom = false;
-  const store = {
-    append(entry) {
-      if (boom) throw new Error('disk full');
-      appended.push(entry);
-    },
-  };
-  const { ledger } = setup({ store });
-  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
-  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1 }, ctx);
-  assert.strictEqual(appended.length, 1);
-
-  boom = true;
-  const r = ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1 }, ctx);
-  assert.strictEqual(r.ok, true, '持久失败不应阻断账本写入');
-  assert.strictEqual(ledger.size(), 2);
-});
-
 /* ── 与家族边界的一致性 ── */
 
 test('边界：本模块不产出存在状态、不做跨域路由决策（只落关系账本）', () => {
@@ -358,7 +452,7 @@ test('边界：本模块不产出存在状态、不做跨域路由决策（只�
   for (const forbidden of ['presence', 'setPresence', 'decide', 'route', 'commit', 'openSession']) {
     assert.strictEqual(api.indexOf(forbidden), -1, '不得侵入专利2/专利5 的职责：' + forbidden);
   }
-  assert.ok(api.indexOf('submit') >= 0);
-  assert.ok(api.indexOf('replay') >= 0);
-  assert.ok(api.indexOf('report') >= 0);
+  for (const required of ['submit', 'verify', 'replay', 'restore', 'report']) {
+    assert.ok(api.indexOf(required) >= 0, '本模块须提供：' + required);
+  }
 });
