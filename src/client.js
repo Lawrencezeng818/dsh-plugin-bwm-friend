@@ -172,8 +172,8 @@ function subscribePresenceRender(bus, layer) {
     const cls = PRESENCE_CLASS[state];
     if (cls) layer.classList.add(cls);
   };
+  applyClass('idle'); // Fallback before synchronous current-state recovery.
   const off = bus.on('presence:state', (p) => { if (p && p.state) applyClass(p.state); });
-  applyClass('idle'); // 初始态
   return off;
 }
 
@@ -199,6 +199,16 @@ async function saveSettings(cfg) {
   }
 }
 
+/* Config 读写竞态防护（2026-09-26）：ledger append / context persist / mode persist 都是
+ * 「GET→合并→PUT」三步；两条链并发交错时后写覆盖先写、丢对方字段（账本条目或上下文静默丢失）。
+ * 所有读改写统一过本串行链（host 侧 withConfigLock 只保 PUT 原子，保不了客户端 GET-PUT 间隙）。 */
+let configWriteChain = Promise.resolve();
+function queueConfigWrite(makePatch) {
+  const run = configWriteChain.then(() => loadSettings().then((cfg) => saveSettings(makePatch(cfg))));
+  configWriteChain = run.catch(() => {});
+  return run;
+}
+
 /* ── Ledger 账本 store（2026-09-10 B2 反超第一步 / 专利4 实施例）──
  * wireLedger 的持久化适配器：逐事件 append（内存镜像 + 单飞行写穿 settings 通道），
  * load() 返回持久层全量（core 侧异步恢复、合并守 200 上限）。
@@ -210,15 +220,14 @@ function createLedgerStore() {
   let prime = loadSettings()
     .then((cfg) => { mirror = Array.isArray(cfg.wireLedger) ? cfg.wireLedger.slice() : []; })
     .catch(() => { mirror = []; });
-  let saving = Promise.resolve();
   return {
     append(entry) {
       if (!mirror) { mirror = []; }
       mirror.push(entry);
       if (mirror.length > 500) mirror = mirror.slice(-500);
-      saving = saving
-        .then(() => loadSettings())
-        .then((cfg) => saveSettings({ ...cfg, wireLedger: mirror }))
+      // 2026-09-26：改走全局串行链——原私有 saving 链与 context persist 链并发时
+      // GET-PUT 交错互丢字段（后写覆盖先写，账本条目静默丢失）
+      queueConfigWrite((cfg) => ({ ...cfg, wireLedger: mirror }))
         .catch(() => { /* 写失败由 core 侧无感知（append 已同步成功入镜像）；宿主恢复时以最近一次成功为准 */ });
     },
     load() {
@@ -587,7 +596,7 @@ function wireToggle(bus, context, adapter, btn) {
       } catch (e) { console.error('[bwm] layout error', e); }
     }
     if (opts.persist !== false) {
-      loadSettings().then((cfg) => saveSettings({ ...cfg, mode }));
+      queueConfigWrite((cfg) => ({ ...cfg, mode })); // 2026-09-26：过全局串行链防读改写竞态
     }
     render();
   };
@@ -607,23 +616,40 @@ function wireToggle(bus, context, adapter, btn) {
     setTimeout(() => btn.classList.remove('bwm-toggling'), 300);
   });
   // 拖动（pointer events；位移 > 5px 视为拖动，抑制点击）
+  // 2026-09-26 修复「拖完弹回原位」（README Known Limitations 根因）：原 pointerup 把
+  // right/bottom 重置回 BTN_BASE_POS——拖动只是 transform 视觉假象，松手即归位。
+  // 现在：落点即新位（transform 位移折算进 right/bottom 并 clamp 在视口内）。
   let dragging = false, moved = 0, sx = 0, sy = 0;
-  btn.addEventListener('pointerdown', (e) => { dragging = true; moved = 0; sx = e.clientX; sy = e.clientY; btn.setPointerCapture(e.pointerId); });
+  let startRight = BTN_BASE_POS.right, startBottom = BTN_BASE_POS.bottom;
+  btn.addEventListener('pointerdown', (e) => {
+    dragging = true; moved = 0; sx = e.clientX; sy = e.clientY;
+    startRight = parseFloat(btn.style.right) || BTN_BASE_POS.right;
+    startBottom = parseFloat(btn.style.bottom) || BTN_BASE_POS.bottom;
+    btn.setPointerCapture(e.pointerId);
+  });
   btn.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
     moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+    // 屏幕坐标 y 向下为正，transform 跟随手指：向下拖 dy>0 → translateY 正值
     if (moved > 2) btn.style.transform = `translate(${dx}px, ${dy}px)`;
   });
-  btn.addEventListener('pointerup', () => {
+  const endDrag = (e) => {
+    if (!dragging) return;
     dragging = false;
+    const dx = (e.clientX || sx) - sx, dy = (e.clientY || sy) - sy;
     if (moved > 5) {
       suppressClick = true;
-      btn.style.right = BTN_BASE_POS.right + 'px';
-      btn.style.bottom = BTN_BASE_POS.bottom + 'px';
+      // bottom 向上为正 → 向下拖 dy>0 则 bottom 减小（取 -dy）；clamp 在视口内
+      const nr = Math.min(Math.max(startRight - dx, 8), Math.max(8, innerWidth - btn.offsetWidth - 8));
+      const nb = Math.min(Math.max(startBottom - dy, 8), Math.max(8, innerHeight - btn.offsetHeight - 8));
+      btn.style.right = nr + 'px';
+      btn.style.bottom = nb + 'px';
     }
     btn.style.transform = '';
-  });
+  };
+  btn.addEventListener('pointerup', endDrag);
+  btn.addEventListener('pointercancel', endDrag);
   return applyMode;
 }
 
@@ -638,13 +664,14 @@ function BwmSettingsSection() {
   const switchTheme = (theme) => {
     const next = { ...cfg, avatar: { ...cfg.avatar, theme } };
     setCfg(next);
-    saveSettings(next);
+    queueConfigWrite((c) => ({ ...c, avatar: { ...(c.avatar || {}), theme } })); // 2026-09-26：串行链防竞态
     applyTheme(document.getElementById('bwm-avatar-video'), theme);
   };
   const toggleMode = () => {
-    const next = { ...cfg, mode: validMode(cfg.mode === 'work' ? 'companion' : 'work') };
+    const nextMode = validMode(cfg.mode === 'work' ? 'companion' : 'work');
+    const next = { ...cfg, mode: nextMode };
     setCfg(next);
-    saveSettings(next);
+    queueConfigWrite((c) => ({ ...c, mode: nextMode })); // 2026-09-26：串行链防竞态
     document.body.setAttribute('data-bwm-mode', next.mode);
   };
   return React.createElement(
@@ -751,8 +778,9 @@ html, body, #root, #root > div, [class*=frame], [class*=centerCol], [class*=cent
 .PNUCKq_chevron { color: #7bf2d2 !important; }
 .eLe3jW_trigger { color: #e8efec !important; }
 .eLe3jW_trigger svg { color: #7bf2d2 !important; }
-/* 清掉 composer 区域（卡片外的容器/阴影）任何暗底与阴影（只影响外观） */
-[class*=composerSeat], [class*=composerStack], [class*=heroWorkspaceRow], [class*=centerCol] > div, [class*=scrollBody], [class*=root] { box-shadow: none !important; background: transparent !important; child-shadow: none !important; }
+/* 清掉 composer 区域（卡片外的容器/阴影）任何暗底与阴影（只影响外观）
+   2026-09-26：删除无效声明 child-shadow（非 CSS 属性，浏览器静默忽略——笔误清零） */
+[class*=composerSeat], [class*=composerStack], [class*=heroWorkspaceRow], [class*=centerCol] > div, [class*=scrollBody], [class*=root] { box-shadow: none !important; background: transparent !important; }
 .p7GS4W_root { box-shadow: none !important; }
 /* ContextMeter（上下文用量圆环）：原生组件，位于 trailing 内、发送键旁（InputBar 渲染顺序 =
    模型 trigger → ContextMeter → primary）。空间不足时保护圆环不收缩（长模型名优先截断模型名）。
@@ -901,10 +929,15 @@ function applyEmbeddedHarness(ctx) {
   (function wireAutoScroll() {
     if (isPop || window.__bwmAutoScrollWired) return;
     window.__bwmAutoScrollWired = true;
+    // 2026-09-26 修复：候选容器收敛到「会话区」（centerCol 内），排除侧栏（waGfua_list 会话树）
+    // 与 composer dock（TodoPanel .list）——原全文档 [class*=scroll]/[class*=list] 会把侧栏
+    // 和任务列表也强制滚到底（用户浏览会话树被抢滚动），且任一非底部容器会误触发全局暂停。
     const SCROLLERS = '[class*=scrollBody], [class*=viewArea], [class*=centerCol] > [class*=root], [class*=scroll], [class*=list]';
+    const isConversationScroller = (el) =>
+      el.closest('[class*=centerCol]') && !el.closest('[class*=sidebarCol]') && !el.closest('[class*=composerStack]');
     const scrollContainers = () => {
       const set = new Set();
-      document.querySelectorAll(SCROLLERS).forEach((el) => set.add(el));
+      document.querySelectorAll(SCROLLERS).forEach((el) => { if (isConversationScroller(el)) set.add(el); });
       return [...set];
     };
     const scrollToBottom = () => {
@@ -912,7 +945,10 @@ function applyEmbeddedHarness(ctx) {
     };
     // 用户主动上翻（离开底部）→ 暂停自动滚（避免抢滚动）；回到底部 → 恢复。
     // 捕获阶段监听：scroll 事件不冒泡，但会经捕获阶段到达 document，覆盖任意实际滚动容器。
-    document.addEventListener('scroll', () => {
+    // 只考虑会话区容器：侧栏/任务列表的滚动位置与「是否跟随最新消息」无关（误判根因）。
+    document.addEventListener('scroll', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1 || !isConversationScroller(t)) return;
       let nearBottom = true;
       scrollContainers().forEach((el) => {
         if (el.scrollHeight - el.scrollTop - el.clientHeight >= 60) nearBottom = false;
@@ -1152,7 +1188,7 @@ function apply(ctx) {
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       const snapshot = runtime.persistSnapshot();
-      loadSettings().then((cfg) => saveSettings({ ...cfg, context: snapshot }));
+      queueConfigWrite((cfg) => ({ ...cfg, context: snapshot })); // 2026-09-26：串行链防竞态（与 ledger append 互丢字段的根因）
     }, 1500);
   };
   context.watch(() => persistContext());

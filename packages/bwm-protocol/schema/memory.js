@@ -2,10 +2,12 @@
 // 冻结 v1.0.0（2026-08-24）。host 与 SDK 共享同一抽取逻辑（单一来源）。
 
 // 轻量事实抽取：用户消息里的偏好/自称/关键陈述（规则启发式；决策层未来上移 Memory Runtime）
+// 正则全部有界（P2 修复 · 防 ReDoS）：不允许出现无界 `.*` 量词
 export const FACT_PATTERNS = [
   /(?:我喜欢|我爱|我最喜欢|超喜欢|很喜欢)\s*([^，。！？]{2,20})/,
   /(?:我是|我叫|我的名字是)\s*([^，。！？]{2,20})/,
-  /(?:我在|我住在|我来自|我家在|我是.*的)\s*([^，。！？]{2,24})/,
+  // 「我是…的」自我描述：跨度加界 {0,24}（原 `我是.*的` 为无界回溯，超长输入可被拖垮）
+  /(?:我在|我住在|我来自|我家在|我是.{0,24}的)\s*([^，。！？]{2,24})/,
   /(?:我想要|我想买|我想去|我希望|我想学)\s*([^，。！？]{2,24})/,
   /(?:我最近|昨天|今天|上周)\s*([^，。！？]{2,24})/,
 ];
@@ -49,7 +51,9 @@ export function mergeMemory(mem, message) {
     if (!next.userFacts.includes(f)) next.userFacts.push(f);
   }
   next.userFacts = next.userFacts.slice(-USER_FACTS_MAX);
-  next.recentTopics.unshift(String(message).slice(0, 80));
+  // 裁剪方向修复（P2）：push 追加（最新在末尾）+ slice(-MAX) 保留最近 N 条；
+  // 原实现 unshift 后 slice(-10) 保留的是最旧 10 条（方向反了）
+  next.recentTopics.push(String(message).slice(0, 80));
   next.recentTopics = next.recentTopics.slice(-RECENT_TOPICS_MAX);
   return next;
 }
@@ -64,6 +68,7 @@ export function memoryPrompt(mem) {
   const topics = Array.isArray(mem.recentTopics) ? mem.recentTopics : [];
   if (facts.length === 0 && topics.length === 0) return '';
   const f = facts.length > 0 ? `关于用户记得：${facts.join('；')}。` : '';
-  const r = topics.length > 0 ? `最近聊过：${topics.slice(0, 3).join(' | ')}。` : '';
+  // 与裁剪方向修复配套：最新话题在末尾 → 取末 3 条并倒序（新→旧）展示
+  const r = topics.length > 0 ? `最近聊过：${topics.slice(-3).reverse().join(' | ')}。` : '';
   return `${f}${r}`;
 }

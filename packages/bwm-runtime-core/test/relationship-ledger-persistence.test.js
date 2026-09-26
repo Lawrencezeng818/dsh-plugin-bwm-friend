@@ -279,3 +279,64 @@ test('对照：幂等的重复增量抑制 —— 无幂等键 vs 有幂等键',
   assert.strictEqual(withIdem.size(), 1, '同一事件标识重复投递只产生一条');
   assert.strictEqual(withIdem.replay().state.trust, 0.5, '不产生重复增量（否则为 1.5）');
 });
+
+/* ── P2 修复回归：append 返回 rejected Promise / store.load 双契约 ── */
+
+test('持久化⑧：append 返回 rejected Promise → 回滚该条（entries/seen），持久失败不提交', async () => {
+  const file = newFile();
+  const base = fileStore(file);
+  let fail = false;
+  const store = {
+    append(entry) {
+      if (fail) return Promise.reject(new Error('async disk full'));
+      return base.append(entry);
+    },
+    load: base.load,
+  };
+  const l = createRelationshipLedger({ store });
+  assert.strictEqual(l.submit({ eventId: 'ok_evt', eventType: 'tool_execution', salience: 9, confidence: 1, at: 0 }, CTX).ok, true);
+
+  fail = true;
+  const bad = l.submit({ eventId: 'bad_evt', eventType: 'tool_execution', salience: 9, confidence: 1, at: 1 }, CTX);
+  assert.strictEqual(bad.ok, true, '同步受理（Promise 结果未知）');
+
+  await new Promise((res) => setTimeout(res, 10)); // 等待异步失败抵达
+  assert.strictEqual(l.size(), 1, '异步持久失败后该条已从内存权威视图回滚');
+  assert.strictEqual(l.has('bad_evt'), false, '幂等索引一并回滚（事件可重投）');
+  assert.ok(/async disk full/.test(l.lastPersistError() || ''), '内部错误标志可见（不静默逃逸）');
+
+  fail = false;
+  const retry = l.submit({ eventId: 'bad_evt', eventType: 'tool_execution', salience: 9, confidence: 1, at: 1 }, CTX);
+  assert.strictEqual(retry.ok, true, '回滚后同一事件可重新提交');
+  assert.strictEqual(l.size(), 2);
+});
+
+test('持久化⑨：store.load 双契约——同步数组行为不变，Promise 契约兼容，load 失败明确报错', async () => {
+  const file = newFile();
+  const store1 = fileStore(file);
+  const l1 = createRelationshipLedger({ store: store1 });
+  l1.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 0 }, CTX);
+  assert.strictEqual(l1.size(), 1);
+
+  // 异步契约：load 返回 Promise → restore 返回 Promise，结果形状一致
+  const asyncStore = { append: store1.append, load() { return Promise.resolve(store1.load()); } };
+  const l2 = createRelationshipLedger({ store: asyncStore });
+  const r2 = await l2.restore();
+  assert.strictEqual(r2.ok, true);
+  assert.strictEqual(r2.restored, 1);
+  assert.strictEqual(l2.size(), 1);
+  assert.strictEqual(l2.has(l1.all()[0].eventId), true);
+
+  // 同步契约：行为与旧版一致（直接返回结果对象，非 Promise）
+  const l3 = createRelationshipLedger({ store: fileStore(file) });
+  const r3 = l3.restore();
+  assert.strictEqual(r3.ok, true);
+  assert.strictEqual(r3.restored, 1);
+
+  // 异步 load 失败：明确 LOAD_FAILED（rejected Promise 不逃逸）
+  const l4 = createRelationshipLedger({ store: { append() {}, load() { return Promise.reject(new Error('io down')); } } });
+  const r4 = await l4.restore();
+  assert.strictEqual(r4.ok, false);
+  assert.strictEqual(r4.error, LEDGER_ERRORS.LOAD_FAILED);
+  assert.ok(/io down/.test(r4.cause));
+});

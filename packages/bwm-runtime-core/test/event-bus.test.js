@@ -76,3 +76,40 @@ test('非法 presence fallback（协议 state.json 语义）', () => {
   rt.emit('presence:state', { state: 'bogus' });
   assert.equal(got[got.length - 1].state, 'bogus'); // 传输层不拦截；决策层（Presence Runtime）负责规范化
 });
+
+/* ── 回调隔离（P2 修复）：route 裁决回调 / 订阅即回放 / replay 三处逐帧隔离 ── */
+
+test('route 裁决回调抛错不中断 emit（按未裁决处理）', () => {
+  const bus = createEventBus();
+  bus.route('agent.tool.call', () => { throw new Error('router boom'); });
+  const got = [];
+  bus.on('agent.tool.call', (p) => got.push(p));
+  let ev = null;
+  assert.doesNotThrow(() => { ev = bus.emit('agent.tool.call', { tool: 'x' }); });
+  assert.equal(got.length, 1, '订阅者照常收到事件');
+  assert.ok(ev && ev.channel === 'agent.tool.call', 'emit 正常返回事件帧');
+});
+
+test('replay：一个监听器抛错不中断其余监听器的回放', () => {
+  const bus = createEventBus();
+  bus.emit('agent.tool.call', { tool: 'x' });
+  const got = [];
+  assert.doesNotThrow(() => {
+    // 先注册（迭代序在前）：订阅即回放时抛错被隔离
+    bus.on('agent.tool.call', () => { throw new Error('boom in replay'); });
+  });
+  bus.on('agent.tool.call', (p) => got.push(p)); // 后注册：订阅回放得 1 次
+  assert.doesNotThrow(() => bus.replay());
+  assert.equal(got.length, 2, '订阅回放 1 次 + 显式 replay 1 次：replay 中前者抛错不中断后者的投递');
+});
+
+test('on 订阅即回放：回放中抛错被隔离，后续监听器不受影响', () => {
+  const bus = createEventBus();
+  bus.emit('agent.tool.call', { tool: 'x' });
+  const got = [];
+  assert.doesNotThrow(() => {
+    bus.on('agent.tool.call', () => { throw new Error('boom during subscribe-replay'); });
+  });
+  bus.on('agent.tool.call', (p) => got.push(p));
+  assert.equal(got.length, 1, '第二个监听器的订阅回放照常执行');
+});

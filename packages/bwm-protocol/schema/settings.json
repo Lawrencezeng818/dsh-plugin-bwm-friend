@@ -57,6 +57,27 @@
         "pauseOnBlur": { "type": "boolean" },
         "pauseOnBattery": { "type": "boolean" }
       }
+    },
+    "factgate": {
+      "type": "object",
+      "description": "事实门控域注册表覆盖（2026-09-22）：域ID → {label, source}",
+      "properties": {
+        "domains": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "source": { "type": "string", "minLength": 1 }
+            },
+            "required": ["label", "source"]
+          }
+        }
+      }
+    },
+    "wireLedger": {
+      "type": "array",
+      "description": "账本落盘白名单（host 侧 fail-open 补丁协议面：数组放行，非数组拒绝）"
     }
   },
   "required": ["version"]

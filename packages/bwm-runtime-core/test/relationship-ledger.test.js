@@ -326,6 +326,38 @@ test('验证：规则版本缺失 → 明确失败，不静默跳过', () => {
   assert.strictEqual(v.mismatches[0].reason, LEDGER_ERRORS.UNKNOWN_RULE_VERSION);
 });
 
+test('验证：limit 真实截断扫描（仅查前 N 条）；Δ 为 NaN 判为篡改', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'generated_template', salience: 9, confidence: 1, at: 0 }, ctx);
+  ledger.submit({ eventType: 'code_analysis', salience: 7, confidence: 0.9, at: 1000 }, ctx);
+  ledger.submit({ eventType: 'tool_execution', salience: 8, confidence: 1, at: 2000 }, ctx);
+  ledger.all()[2].delta.trust = NaN; // 模拟篡改（NaN）
+  const v1 = ledger.verify({ limit: 2 });
+  assert.strictEqual(v1.ok, true, 'limit=2 只扫描前两条（未触及被改条目）——limit 真实截断');
+  assert.strictEqual(v1.checked, 2);
+  const v2 = ledger.verify();
+  assert.strictEqual(v2.ok, false, '全量扫描检出 NaN 篡改');
+  assert.strictEqual(v2.mismatches[0].dimension, 'trust');
+  assert.ok(Number.isNaN(v2.mismatches[0].actual), 'NaN 如实上报（不再被 || 0 吞掉）');
+});
+
+test('时间归一化：ISO 字符串与数值毫秒混合 → 排序稳定、区间过滤按数值生效', () => {
+  const { ledger } = setup();
+  const ctx = { binding: { subjectId: 'u_1' }, snapshot: { outcome: 'completed' } };
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: '1970-01-01T00:00:10.000Z' }, ctx); // 10000ms
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: 5000 }, ctx);                     // 数值 5000
+  ledger.submit({ eventType: 'tool_execution', salience: 9, confidence: 1, at: '1970-01-01T00:00:20.000Z' }, ctx); // 20000ms
+  // 修复前：字符串-数值相减得 NaN → 排序退化为插入序（10s, 5s, 20s 的错误顺序）
+  assert.deepStrictEqual(
+    ledger.report().entries.map((e) => e.at),
+    [5000, '1970-01-01T00:00:10.000Z', '1970-01-01T00:00:20.000Z'],
+    '按归一化后的数值时间稳定排序'
+  );
+  const rep = ledger.report({ from: 6000, to: 15000 });
+  assert.strictEqual(rep.count, 1, '区间过滤按归一化时间生效（只命中 10s 条目）');
+});
+
 /* ── 步骤七：指定评价时刻重放（两层量）── */
 
 test('重放：评价时刻为空 → 等价于按初始增量 Δ0 顺次累加', () => {

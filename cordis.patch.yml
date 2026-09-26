@@ -11,3 +11,5 @@
     - id: bwm-friend-invariant
       name: 'dsh-plugin-bwm-friend/invariant'
       disabled: false
+    - id: bwm-friend-factgate
+      name: 'dsh-plugin-bwm-friend/factgate'

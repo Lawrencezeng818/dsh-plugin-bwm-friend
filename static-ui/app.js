@@ -164,6 +164,7 @@ const state = {
   toastTimer: null,
   voiceResultTimer: null,
   voicePointerId: null,
+  busyWatchdogTimer: null,  // 生成 watchdog 定时器
 };
 
 class PcmStreamPlayer {
@@ -345,6 +346,17 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;");
 }
 
+/* 读接口统一帮手：非 2xx 抛错（带 status），避免把错误响应体当数据渲染 */
+async function fetchJsonOk(url, opts) {
+  const resp = await fetch(url, opts);
+  if (!resp.ok) {
+    const err = new Error(`HTTP ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return resp.json();
+}
+
 /* 友好错误文案：技术错误细节进 console，用户只看可读信息 */
 function friendlyError(error, fallback = "操作失败") {
   const raw = (error && (error.message || error.detail || String(error))) || "";
@@ -384,10 +396,15 @@ function confirmDialog(desc) {
       mask.classList.add("hidden");
       elements.confirmCancel.removeEventListener("click", onCancel);
       elements.confirmOk.removeEventListener("click", onOk);
+      document.removeEventListener("keydown", onKey);  // Esc 关闭：随弹窗关闭一并移除，避免多次打开叠加监听
       resolve(val);
     };
     const onCancel = () => done(false);
     const onOk = () => done(true);
+    const onKey = (event) => {
+      if (event.key === "Escape") done(false);
+    };
+    document.addEventListener("keydown", onKey);
     elements.confirmCancel.addEventListener("click", onCancel);
     elements.confirmOk.addEventListener("click", onOk);
   });
@@ -750,9 +767,10 @@ function updateAvatarDriverMode() {
   elements.avatarInput.accept = imageMode
     ? "image/jpeg,image/png,image/webp"
     : "video/mp4,video/quicktime,video/webm";
+  // 上传入口已在设置页临时隐藏：placeholder 改为静态引导文案，不再引导点击已失效的上传按钮
   elements.placeholderCopy.textContent = imageMode
-    ? "上传一张正脸、清晰的角色图片"
-    : "上传一段正脸、光线稳定的视频";
+    ? "角色影像未配置：开启口型功能并上传图片后，这里会显示她的影像"
+    : "角色影像未配置：开启口型功能并上传视频后，这里会显示她的影像";
   elements.placeholderButton.textContent = imageMode ? "选择图片" : "选择视频";
   elements.silentVideoCreatorLink?.classList.toggle("hidden", imageMode);
   if (elements.avatarDriverServiceLabel) {
@@ -822,6 +840,18 @@ function closeSettings() {
 
 function setBusy(busy) {
   state.busy = Boolean(busy);
+  // 客户端 watchdog：busy 期间事件丢失（如 WS 断线）时 10 分钟后强制解锁，兜底上限与后端生成耗时（约 3-5 分钟）留足余量
+  if (state.busyWatchdogTimer !== null) {
+    clearTimeout(state.busyWatchdogTimer);
+    state.busyWatchdogTimer = null;
+  }
+  if (state.busy) {
+    state.busyWatchdogTimer = setTimeout(() => {
+      state.busyWatchdogTimer = null;
+      setBusy(false);
+      showToast("生成超时，已恢复输入，请重试。", 4200);
+    }, 10 * 60 * 1000);
+  }
   elements.messageInput.disabled = state.busy;
   elements.sendButton.disabled = state.busy;
   elements.voiceButton.disabled = state.busy || state.socket?.readyState !== WebSocket.OPEN;
@@ -924,7 +954,7 @@ async function saveLlmProvider() {
     }
     loadLlmProvider(payload.llmProvider);
     if (state.config) state.config.llmProvider = payload.llmProvider;
-    await refreshStatus();
+    await refreshStatus(true);  // 用户刚点击保存：失败需要可见提示
     showToast(
       payload.llmProvider.provider === "external"
         ? `已切换到三方模型 ${payload.llmProvider.model}，下一轮生效。`
@@ -959,7 +989,7 @@ async function clearLlmApiKey() {
     }
     loadLlmProvider(payload.llmProvider);
     if (state.config) state.config.llmProvider = payload.llmProvider;
-    await refreshStatus();
+    await refreshStatus(true);  // 用户刚点击清除：失败需要可见提示
     showToast("三方 API Key 已清除，并已切回本地 Qwen。");
   } catch (error) {
     showToast(friendlyError(error, "清除 API Key 失败"));
@@ -1012,6 +1042,13 @@ function connectSocket() {
     state.socket = null;
     setPresence("连接中断", "listen");
     elements.voiceButton.disabled = true;
+    // 断线后生成事件不会再到：busy 由生成引起则立即复位，避免输入框永久禁用
+    if (state.busy) {
+      setBusy(false);
+      elements.composerHint.textContent = "连接中断，请重试";
+      showToast("连接中断，请重试。", 3600);
+    }
+    textSubmitPending = false;  // 断线后清除文本提交 pending，恢复可发送
     if (event.code === 4001) {
       setPresence("已在新窗口连接", "listen");
       return;
@@ -1031,7 +1068,13 @@ function connectSocket() {
   let realtimeEventChain = Promise.resolve();
   socket.addEventListener("message", (message) => {
     if (state.socket !== socket) return;
-    const event = JSON.parse(message.data);
+    let event;
+    try {
+      event = JSON.parse(message.data);  // 坏包静默丢弃，避免解析异常打断事件链
+    } catch (error) {
+      console.debug("[ws] 非 JSON 消息已忽略:", error);
+      return;
+    }
     realtimeEventChain = realtimeEventChain
       .then(() => handleRealtimeEvent(event))
       .catch((error) => console.error("[ws] 事件处理失败:", error));
@@ -1044,13 +1087,16 @@ function responseIdFromEvent(event) {
 
 async function loadPersona() {
   try {
-    const resp = await fetch("/api/template/persona");
-    const data = await resp.json();
+    const data = await fetchJsonOk("/api/template/persona");
     state.personaTemplate = data.template || "default";
     if (elements.personaTemplateName) elements.personaTemplateName.textContent = data.template || "默认";
     if (elements.personaInput) elements.personaInput.value = data.persona || "";
+    if (elements.personaSaveBtn) elements.personaSaveBtn.disabled = false;  // 加载成功后才允许保存
   } catch (error) {
     console.error("[persona] 加载失败", error);
+    // 加载失败时输入框为空：允许保存会用空文本覆盖服务端人格，必须禁用保存并提示
+    if (elements.personaSaveBtn) elements.personaSaveBtn.disabled = true;
+    showToast(friendlyError(error, "人格加载失败"), 4200);
   }
 }
 
@@ -1084,8 +1130,7 @@ async function loadVoices() {
   const select = elements.voiceSelect;
   if (!select) return;
   try {
-    const resp = await fetch("/api/voices");
-    const data = await resp.json();
+    const data = await fetchJsonOk("/api/voices");
     const voices = data.voices || [];
     const current = data.current || "";
     const cloneNames = data.clone_names || {};  // {voice_id: "模板名克隆"}
@@ -1133,21 +1178,29 @@ async function loadTemplates() {
   const grid = elements.templateGrid;
   if (!grid) return;
   try {
-    const resp = await fetch("/api/templates");
-    const data = await resp.json();
+    const data = await fetchJsonOk("/api/templates");
+    // 入口清空重建：重复调用不再向网格追加旧卡（默认卡事件也随重建只绑一次）
+    grid.replaceChildren();
     // 默认卡 = 「自定义模板」入口（点击打开添加自定义模板表单）
-    const defaultCard = grid.querySelector('.template-card[data-template="默认"]');
-    if (defaultCard) {
-      defaultCard.addEventListener("click", () => {
-        if (!AUTH.loggedIn) {
-          showPaywall();
-          return;
-        }
-        // 2026-08-18：免费用户也开放（权益用尽 → 生成时 LK 单次付费引导）
-        toggleCustomForm(true);
-      });
-    }
-    // 保留默认卡，追加模板卡（自动发现 input/ 子目录）
+    const defaultCard = document.createElement("button");
+    defaultCard.type = "button";
+    defaultCard.className = "template-card";
+    defaultCard.dataset.template = "默认";
+    const defaultName = document.createElement("b");
+    defaultName.textContent = "自定义模板";
+    const defaultDesc = document.createElement("small");
+    defaultDesc.textContent = "当前形象";
+    defaultCard.append(defaultName, defaultDesc);
+    defaultCard.addEventListener("click", () => {
+      if (!AUTH.loggedIn) {
+        showPaywall();
+        return;
+      }
+      // 2026-08-18：免费用户也开放（权益用尽 → 生成时 LK 单次付费引导）
+      toggleCustomForm(true);
+    });
+    grid.append(defaultCard);
+    // 追加模板卡（自动发现 input/ 子目录）
     const templates = data.templates || [];
     const current = data.current || "";
     // 预加载全部模板视频（说话+待机）→ 切换模板时浏览器缓存命中，秒开
@@ -1169,6 +1222,15 @@ async function loadTemplates() {
     }
   } catch (error) {
     console.error("[template] 加载失败:", error);
+    // 失败不能静默：toast 提示 + 提供重试入口卡
+    showToast(friendlyError(error, "模板列表加载失败"), 4200);
+    grid.replaceChildren();
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "template-card";
+    retry.textContent = "加载失败，点击重试";
+    retry.addEventListener("click", loadTemplates);
+    grid.append(retry);
   }
 }
 
@@ -1183,8 +1245,7 @@ const AUTH = {
 
 async function initAuth() {
   try {
-    const resp = await fetch("/api/auth/status");
-    const data = await resp.json();
+    const data = await fetchJsonOk("/api/auth/status");
     if (data.logged_in) {
       AUTH.loggedIn = true;
       AUTH.subjectId = data.subject_id || "";
@@ -1217,6 +1278,7 @@ function renderAuthUI() {
 }
 
 async function doLogin() {
+  if (elements.loginButton.disabled) return;  // 登录进行中：忽略密码框回车等重复触发
   // 年龄确认（App Store 合规 4.7.5）：AI 生成内容仅面向成年用户，首次登录须确认
   if (!localStorage.getItem("bwm_age_confirmed")) {
     const ageOk = await confirmDialog(
@@ -1261,9 +1323,15 @@ async function doLogin() {
 }
 
 async function doLogout() {
+  // 退出影响会员权益与自定义模板可用性：先确认
+  const ok = await confirmDialog("确定退出登录吗？\n退出后需重新登录才能使用会员权益。");
+  if (!ok) return;
   try {
     await fetch("/api/auth/logout", { method: "POST" });
-  } catch {}
+  } catch {
+    // 本地会话照常清除，但让用户知道服务端登出请求未送达
+    showToast("退出请求失败，请检查网络。", 3200);
+  }
   AUTH.loggedIn = false;
   AUTH.subjectId = "";
   AUTH.username = "";
@@ -1277,16 +1345,16 @@ async function doLogout() {
 async function refreshEntitlements() {
   if (!AUTH.loggedIn) return;
   try {
-    const resp = await fetch("/api/auth/entitlements");
-    if (resp.status === 401) {
+    AUTH.entitlements = await fetchJsonOk("/api/auth/entitlements");
+  } catch (error) {
+    if (error.status === 401) {
+      // 401 语义不变：登出并提示重新登录
       AUTH.loggedIn = false;
       renderAuthUI();
       renderCustomTemplates();
       showToast("登录已过期，请重新登录", 3200);
       return;
     }
-    AUTH.entitlements = await resp.json();
-  } catch (error) {
     console.error("[auth] entitlements 失败:", error);
   }
 }
@@ -1378,16 +1446,16 @@ async function loadCustomTemplates() {
     return;
   }
   try {
-    const resp = await fetch("/api/auth/custom-templates");
-    if (resp.status === 401) {
+    const data = await fetchJsonOk("/api/auth/custom-templates");
+    AUTH.customTemplates = data.templates || [];
+  } catch (error) {
+    if (error.status === 401) {
+      // 401 语义不变：登出并刷新未登录态
       AUTH.loggedIn = false;
       renderAuthUI();
       renderCustomTemplates();
       return;
     }
-    const data = await resp.json();
-    AUTH.customTemplates = data.templates || [];
-  } catch (error) {
     console.error("[auth] 自定义模板加载失败:", error);
   }
   renderCustomTemplates();
@@ -1426,7 +1494,7 @@ function renderCustomTemplates() {
     del.textContent = "✕";
     del.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      deleteCustomTemplate(tpl.id);
+      deleteCustomTemplate(tpl.id, del);
     });
     card.append(del);
     grid.append(card);
@@ -1601,7 +1669,11 @@ async function applyCustomTemplate(tpl) {
   }
 }
 
-async function deleteCustomTemplate(id) {
+async function deleteCustomTemplate(id, btn) {
+  // 删除不可恢复：先经确认弹窗，防误触直接 DELETE
+  const ok = await confirmDialog("确定删除该自定义模板吗？\n删除后不可恢复。");
+  if (!ok) return;
+  if (btn) btn.disabled = true;  // 删除进行中禁用按钮，防重复提交
   try {
     const resp = await fetch(`/api/auth/custom-templates/${id}`, { method: "DELETE" });
     const data = await resp.json();
@@ -1610,6 +1682,8 @@ async function deleteCustomTemplate(id) {
     await loadCustomTemplates();
   } catch (error) {
     showToast(friendlyError(error, "删除失败"), 3200);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1761,8 +1835,8 @@ async function handleRealtimeEvent(event) {
   }
 
   // ⚠️ 2026-08-19：服务端权威扣次后推送剩余额度（原前端手动 consume 已移除）
-  if (type === "quota.updated" && msg && typeof msg.remaining === "number") {
-    state.quota = msg;
+  if (type === "quota.updated" && event && typeof event.remaining === "number") {
+    state.quota = event;  // 修复：此处应使用事件参数 event（原误写 msg 导致 ReferenceError，额度徽章不更新）
     updateQuotaUI();
     return;
   }
@@ -1784,6 +1858,7 @@ async function handleRealtimeEvent(event) {
 
   if (type === "response.created") {
     clearVoiceResultTimeout();
+    textSubmitPending = false;  // 服务端已受理：解除文本提交防抖
     ensureResponseOpen(event);
     setPresence("正在回应", "think");
     return;
@@ -2243,7 +2318,7 @@ async function startRecording() {
   } catch (error) {
     state.recordingRequested = false;
     elements.voiceOrbWrap.classList.remove("holding");
-    elements.composer.classList.add("attention");
+    // 修复：移除 attention class 写入——无对应 CSS 且无移除逻辑，属死代码
     showToast("没有可用麦克风，已保留键盘输入。");
     elements.messageInput.focus();
   } finally {
@@ -2300,13 +2375,20 @@ async function stopRecording() {
   }
 }
 
+let textSubmitPending = false;  // 文本提交防抖：response.created 前忽略重复发送，避免重复扣次
+
 function submitText() {
   const text = elements.messageInput.value.trim();
   if (!text) return;
+  if (textSubmitPending) return;  // 上一条尚未受理，忽略本次提交
   clearVoiceResultTimeout();
   expandDialogue();
   audioPlayer.activate().catch(() => {});
-  if (!sendSocket({ type: "user.text", text })) return;
+  textSubmitPending = true;  // 发送即置 pending，response.created / 发送失败 / 断线时清除
+  if (!sendSocket({ type: "user.text", text })) {
+    textSubmitPending = false;
+    return;
+  }
   // ⚠️ 2026-08-19：扣次已移到服务端（WS 收到 user.text 时权威扣除，防绕过）
   // 前端改为监听 quota.updated 事件刷新剩余；此处不再主动调 /api/quota/consume（避免双扣）
   addHistory("user", text);
@@ -2336,7 +2418,13 @@ function uploadAvatar(file) {
     showToast("角色图片不能超过 20MB。");
     return;
   }
+  // 视频驱动此前无上限：与待机视频对齐补 2GB 校验，防误传超大文件拖死上传
+  if (!imageMode && file.size > 2 * 1024 * 1024 * 1024) {
+    showToast("角色视频不能超过 2GB。");
+    return;
+  }
 
+  const previous = state.avatar;  // 记录旧素材，失败时回滚展示
   const previewUrl = URL.createObjectURL(file);
   if (imageMode) {
     elements.avatarVideo.pause();
@@ -2366,8 +2454,16 @@ function uploadAvatar(file) {
     URL.revokeObjectURL(previewUrl);
     elements.uploadProgress.style.width = "100%";
     setTimeout(() => (elements.uploadProgress.style.width = "0%"), 600);
+    let payload = null;
     if (request.status >= 200 && request.status < 300) {
-      const payload = JSON.parse(request.responseText);
+      // 成功响应也可能非 JSON（网关错误页等）：解析失败按上传失败处理
+      try {
+        payload = JSON.parse(request.responseText);
+      } catch {
+        payload = null;
+      }
+    }
+    if (payload) {
       state.avatarDriver = payload.driver;
       elements.avatarDriver.value = payload.driver;
       updateAvatarDriverMode();
@@ -2379,6 +2475,9 @@ function uploadAvatar(file) {
           : "视频驱动的角色视频已更新，下一轮会使用它生成口型。",
       );
     } else {
+      // 失败回滚：恢复旧素材展示（对齐 uploadIdleVideo 的回滚行为）
+      state.avatar = previous;
+      restoreIdleAvatar();
       let detail = request.statusText;
       try {
         detail = JSON.parse(request.responseText).detail || detail;
@@ -2388,7 +2487,13 @@ function uploadAvatar(file) {
       showToast(`上传失败：${detail}`);
     }
   });
-  request.addEventListener("error", () => showToast("素材上传失败，请检查本地服务。"));
+  request.addEventListener("error", () => {
+    // 失败回滚：恢复旧素材展示并释放本地预览
+    state.avatar = previous;
+    restoreIdleAvatar();
+    URL.revokeObjectURL(previewUrl);
+    showToast("素材上传失败，请检查本地服务。");
+  });
   request.send(file);
 }
 
@@ -2454,21 +2559,21 @@ function uploadIdleVideo(file) {
   request.send(file);
 }
 
-async function refreshStatus() {
+async function refreshStatus(manual = false) {
   try {
-    const response = await fetch("/api/status");
-    const services = await response.json();
+    const services = await fetchJsonOk("/api/status");
     if (state.config) state.config.services = services;
     updateServices(services);
   } catch {
-    showToast("无法读取本地服务状态。");
+    // 定时轮询失败静默降级为离线态，避免每 15 秒 toast 刷屏；仅手动触发时提示
+    updateServices(null);
+    if (manual) showToast("无法读取本地服务状态。");
   }
 }
 
 async function fetchQuota() {
   try {
-    const resp = await fetch("/api/quota");
-    state.quota = await resp.json();
+    state.quota = await fetchJsonOk("/api/quota");
     updateQuotaUI();
   } catch {
     /* 本地配额不可读时保持占位 */
@@ -2483,8 +2588,13 @@ function updateQuotaUI() {
     el.textContent = "∞ 无限";
     el.classList.add("unlimited");
   } else {
-    el.textContent = `剩余 ${state.quota.remaining} 次`;
-    if (state.quota.remaining <= 0) el.classList.add("exhausted");
+    const remaining = state.quota.remaining;
+    if (!Number.isFinite(remaining)) {
+      el.textContent = "--";  // 额度字段异常时显示占位，避免「剩余 undefined 次」
+    } else {
+      el.textContent = `剩余 ${remaining} 次`;
+      if (remaining <= 0) el.classList.add("exhausted");
+    }
   }
 }
 
@@ -2505,8 +2615,7 @@ function openPurchaseGuide() {
 async function initialize() {
   elements.voiceButton.disabled = true;
   try {
-    const response = await fetch("/api/config");
-    const config = await response.json();
+    const config = await fetchJsonOk("/api/config");
     state.config = config;
     state.avatarDriver = config.lipsync?.driver === "image" ? "image" : "video";
     elements.avatarDriver.value = state.avatarDriver;
@@ -2605,6 +2714,7 @@ elements.voiceCloneBtn?.addEventListener("click", async () => {
     elements.voiceCloneStatus.textContent = "克隆中（约 10-30 秒）…";
     elements.voiceCloneStatus.classList.add("busy");
   }
+  if (elements.voiceCloneBtn) elements.voiceCloneBtn.disabled = true;  // 克隆进行中禁用按钮，防并发重复提交
   const fd = new FormData();
   fd.append("audio", file);
   try {
@@ -2628,6 +2738,8 @@ elements.voiceCloneBtn?.addEventListener("click", async () => {
       elements.voiceCloneStatus.textContent = `克隆失败: ${friendlyError(error, "声音克隆失败")}`;
       elements.voiceCloneStatus.classList.remove("busy");
     }
+  } finally {
+    if (elements.voiceCloneBtn) elements.voiceCloneBtn.disabled = false;  // 无论成败恢复按钮可点
   }
 });
 
@@ -2844,15 +2956,16 @@ async function checkForUpdateNow() {
     if (result.hasUpdate) {
       elements.checkUpdateBtn.classList.add("has-update");
       elements.updateStatusText.textContent = `发现 v${result.latestVersion}`;
+      // 版本号来自远端接口，写入 innerHTML 前必须转义
       elements.updateInfoBox.innerHTML =
-        `<span class="update-new">发现新版本 v${result.latestVersion}</span>（当前 v${result.currentVersion}）<br>` +
+        `<span class="update-new">发现新版本 v${escapeHtml(result.latestVersion)}</span>（当前 v${escapeHtml(result.currentVersion)}）<br>` +
         `大小 ${fmtSize(result.download?.sizeBytes) || "未知"}${result.download?.url ? "" : "，暂无可下载安装包"}`;
       // 有更新 → 直接弹窗引导
       showUpdateDialog(result);
     } else {
       elements.checkUpdateBtn.classList.remove("has-update");
       elements.updateStatusText.textContent = `已是最新 v${result.currentVersion}`;
-      elements.updateInfoBox.innerHTML = `<span class="update-ok">已是最新版本 v${result.currentVersion}</span>`;
+      elements.updateInfoBox.innerHTML = `<span class="update-ok">已是最新版本 v${escapeHtml(result.currentVersion)}</span>`;
       showToast("已是最新版本");
     }
   } catch (e) {

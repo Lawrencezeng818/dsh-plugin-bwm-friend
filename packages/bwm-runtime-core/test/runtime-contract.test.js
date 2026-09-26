@@ -253,3 +253,40 @@ test('向后兼容: 不传 ledger 时行为与 v0.5 一致（无 store 不落盘
   await new Promise((res) => setTimeout(res, 5)); // 无 store → 无恢复路径
   assert.strictEqual(r.context.get('timeline').length, 1);
 });
+
+/* ── P2/P3 修复回归：rejected Promise 上报 / hydrate 浅拷贝 / 关系广播重入护栏 ── */
+
+test('Ledger append 返回 rejected Promise 同样上报（不静默逃逸）', async () => {
+  const errs = [];
+  const r = createRuntime({
+    ledger: { append() { return Promise.reject(new Error('async disk full')); }, load() { return Promise.resolve([]); } },
+  });
+  r.subscribe('ledger:persist.error', (e) => errs.push(e.error));
+  r.emit('agent.task.success', { taskId: 't1', summary: 'x' });
+  await new Promise((res) => setTimeout(res, 10));
+  assert.strictEqual(errs.length, 1, 'rejected Promise 经 ledger:persist.error 上报');
+  assert.ok(/async disk full/.test(errs[0]));
+});
+
+test('hydrate 浅拷贝：外部引用直改不穿透 context（ownership 防绕过）', () => {
+  const rt = createRuntime();
+  const raw = { personality: { archetype: 'X', traits: ['a'] }, memory: { k: 'v' } };
+  rt.hydrateContext(raw);
+  raw.personality.archetype = 'HACKED'; // hydrate 后从外部直改源对象
+  raw.memory.k = 'HACKED';
+  assert.strictEqual(rt.context.get('personality').archetype, 'X', '域对象为拷贝，外部直改不生效');
+  assert.strictEqual(rt.context.get('memory').k, 'v');
+  // ponytail: 浅拷贝只隔离顶层引用；嵌套层级需深隔离时未来升级为逐层拷贝
+});
+
+test('关系广播重入护栏：relationship:changed 监听方再发关系信号被忽略（防互激回路）', () => {
+  const rt = createRuntime();
+  let changedCount = 0;
+  rt.subscribe('relationship:changed', () => {
+    changedCount += 1;
+    rt.emit('agent.task.success', { taskId: 'reentry', summary: '互激再入' }); // 模拟互激：广播回调再触发关系信号
+  });
+  rt.emit('agent.task.success', { taskId: 'root', summary: '原始事件' });
+  assert.strictEqual(rt.context.get('relationship').intimacy, 1, '重入信号不再产生关系增量（无护栏时为数千级）');
+  assert.strictEqual(changedCount, 1, '广播只发生一次（无护栏时递归广播）');
+});

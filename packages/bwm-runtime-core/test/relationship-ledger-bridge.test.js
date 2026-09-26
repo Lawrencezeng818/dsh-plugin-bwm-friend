@@ -61,23 +61,40 @@ test('接线：感知事件经门控后写入关系账本，共享事件标识�
   assert.strictEqual(s.ledger.size(), 1);
 });
 
-test('接线：未获准事件（低显著性）无候选写入指令 → 账本保持为空', () => {
+test('接线：未获准事件强行桥接 → 桥接入口拒绝（not_persist_granted），账本保持为空', () => {
   const s = setupPipeline();
   const { updates } = route(s, {
     sourceType: 'camera',
-    salience: 1,          // 低于显著性门控
+    salience: 6,          // 通过显著性门控产出易失指令；未确认 → 持久域 DENY
     confidence: 0.9,
-    summary: '无关噪点',
+    summary: '普通感知',
     foreground: true,
+    userConfirmed: false,
   });
-  assert.strictEqual(updates.filter((u) => u.domain === 'ledger').length, 0, '低显著性不得产出持久域指令');
-  // 仅有易失域指令；即便强行桥接也应有明确失败路径
+  assert.strictEqual(updates.filter((u) => u.domain === 'ledger').length, 0, '未显式确认不得产出持久域指令');
   const volatile = updates.find((u) => u.domain === 'presence');
-  if (volatile) {
-    const r = bridgePerceptionToLedger(s.ledger, volatile, {});
-    assert.strictEqual(s.ledger.size(), 0, '未获准路径不得写入账本');
-    assert.strictEqual(r.ok, false);
-  }
+  assert.ok(volatile, '前置：易失域指令真实存在（强行桥接分支可达，不再是恒空跳过）');
+  const r = bridgePerceptionToLedger(s.ledger, volatile, {});
+  assert.strictEqual(r.ok, false, '易失指令强行桥接被拒');
+  assert.strictEqual(r.error, 'not_persist_granted', '桥接入口复核：非持久获准指令不入账');
+  assert.strictEqual(s.ledger.size(), 0, '未获准路径不得写入账本');
+});
+
+test('接线：伪造持久指令绕过桥接门 → 账本端 admit 感知确认门拒绝', () => {
+  const s = setupPipeline();
+  // 绕过路由器直接伪造 domain=ledger / mode=persist 的指令（模拟持久化准入旁路攻击面）
+  const forged = {
+    domain: 'ledger', domainClass: 'persistent', mode: 'persist',
+    eventId: 'evt_forged', subjectId: 'u_1', relationScope: 'u_1',
+    policyVersion: 'policy-v1',
+    payload: { summary: '伪造高显著事件', salience: 9, sourceType: 'camera', userConfirmed: false },
+    at: 1_700_000_000_000,
+  };
+  const r = bridgePerceptionToLedger(s.ledger, forged, {});
+  assert.strictEqual(r.ok, false, '无确认信息的感知条目拒绝入账（账本端二次门）');
+  assert.strictEqual(r.stage, 'admit');
+  assert.ok(r.admission.reasons.includes('perception_not_user_confirmed'), '感知确认门理由可见');
+  assert.strictEqual(s.ledger.size(), 0, '伪造指令不得落账');
 });
 
 test('接线：持久域未获显式确认/分享 → 拒绝持久化 → 账本为空', () => {

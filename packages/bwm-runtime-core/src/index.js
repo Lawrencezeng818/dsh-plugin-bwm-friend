@@ -43,6 +43,8 @@ const EVENT_VERSIONS = {
 /* ── Event Kernel（Agent Event Bus v1.1：Router + Policy + Subscriber + 事件 version）── */
 // 从 src/client.js 原样搬移（2026-08-24 P1.1）——自此 Event Kernel 归 Runtime，Shell 不再拥有
 function createEventBus() {
+  // Presence is a current-value channel, not an animation history.
+  const retained = new Map();
   const listeners = new Map(); // channel → Set<{fn, when}>
   const history = [];
   const routes = []; // Router 规则：[eventPattern, route(payload, meta) → {channels, blocked}]
@@ -59,27 +61,47 @@ function createEventBus() {
     on(channel, fn, opts = {}) {
       const when = opts.when || (() => true);
       if (!listeners.has(channel)) listeners.set(channel, new Set());
-      const entry = { fn, when };
+      const entry = { fn, when, replay: opts.replay !== false };
       listeners.get(channel).add(entry);
-      for (const ev of history) if (ev.channel === channel && when(ev.payload, ev.meta)) fn(ev.payload);
+      if (opts.replay !== false) {
+        const frames = channel === 'presence:state'
+          ? (retained.has(channel) ? [retained.get(channel)] : [])
+          : history.filter(ev => ev.target === channel);
+        // 订阅即回放：逐帧隔离——单监听器（含 when 谓词）抛错不中断回放（P2 修复）
+        for (const ev of frames) {
+          try {
+            if (when(ev.payload, ev.meta)) fn(ev.payload, ev.meta);
+          } catch (e) {
+            console.error(`[bwm] event ${channel} replay handler failed`, e);
+          }
+        }
+      }
       return () => listeners.get(channel)?.delete(entry);
     },
     emit(channel, payload = {}, meta = {}) {
-      // Router 裁决：可阻止或改道
+      // Router 裁决：可阻止或改道（裁决回调逐个隔离：抛错按「未裁决」处理，不中断 emit——P2 修复）
       let target = channel;
       let blocked = false;
       for (const { pattern, router } of routes) {
         if (pattern === channel || (pattern instanceof RegExp && pattern.test(channel))) {
-          const r = router(payload, meta);
+          let r = null;
+          try {
+            r = router(payload, meta);
+          } catch (e) {
+            console.error(`[bwm] route handler failed for ${channel}`, e);
+          }
           if (r && r.blocked) blocked = true;
           if (r && r.channel) target = r.channel;
         }
       }
       const ev = { channel, target, version: EVENT_VERSIONS[channel] || '1.0', payload, meta, at: new Date().toISOString() };
+      // Only the admitted, routed frame can enter either delivery path.
+      if (blocked) return ev;
       history.push(ev);
       if (history.length > 500) history.shift();
-      if (blocked) return ev;
+      if (target === 'presence:state') retained.set(target, ev);
       for (const entry of listeners.get(target) || []) {
+        if (target === 'presence:state' && retained.get(target) !== ev) break;
         try {
           if (entry.when(payload, meta)) entry.fn(payload, meta);
         } catch (e) {
@@ -89,7 +111,20 @@ function createEventBus() {
       return ev;
     },
     replay() {
-      for (const ev of history) for (const entry of listeners.get(ev.target) || []) entry.fn(ev.payload, ev.meta);
+      // Freeze history traversal: handlers may synchronously emit new frames.
+      const deliver = ev => {
+        for (const entry of listeners.get(ev.target) || []) {
+          if (ev.target === 'presence:state' && retained.get(ev.target) !== ev) break;
+          // 回放隔离：单监听器（含 when 谓词）抛错不中断全部回放（P2 修复）
+          try {
+            if (entry.replay && entry.when(ev.payload, ev.meta)) entry.fn(ev.payload, ev.meta);
+          } catch (e) {
+            console.error(`[bwm] event ${ev.target} replay handler failed`, e);
+          }
+        }
+      };
+      for (const ev of history.slice()) if (ev.target !== 'presence:state') deliver(ev);
+      for (const ev of retained.values()) deliver(ev);
     },
   };
 }
@@ -282,7 +317,11 @@ function createAgentContext() {
           migrate(raw.schemaVersion); // 旧版本 → 迁移链
         }
         for (const k of Object.keys(domains)) {
-          if (raw[k] !== undefined) domains[k] = raw[k];
+          const v = raw[k];
+          if (v === undefined) continue;
+          // 浅拷贝入域（P3 修复）：外部引用直改不再穿透 context 绕过 ownership
+          // （数组与普通对象分别做顶层拷贝；嵌套层级仍共享——快照通道为 JSON 序列化数据，够用）
+          domains[k] = Array.isArray(v) ? v.slice() : (v && typeof v === 'object' ? { ...v } : v);
         }
       }
     },
@@ -315,10 +354,11 @@ function updateTaskState(context, { taskId = null, outcome = null, at = null } =
   const stamp = at || new Date().toISOString();
   const next = { ...prev, last: outcome, taskId, at: stamp };
   if (Array.isArray(prev.pending)) {
-    next.pending = prev.pending.filter((t) => !t || t.id !== taskId);
+    // 真过滤（P3 修复）：null/undefined 垃圾项不再保留（原 `!t ||` 会把空项留在列表里）
+    next.pending = prev.pending.filter((t) => t && t.id !== taskId);
   }
   const done = { id: taskId, stage: outcome, at: stamp };
-  next.recent = [done, ...(Array.isArray(prev.recent) ? prev.recent.filter((t) => !t || t.id !== taskId) : [])].slice(0, 10);
+  next.recent = [done, ...(Array.isArray(prev.recent) ? prev.recent.filter((t) => t && t.id !== taskId) : [])].slice(0, 10);
   context.set('tasks', next);
 }
 
@@ -335,12 +375,17 @@ function wireLedger(bus, context, opts = {}) {
     timeline.push(entry);
     context.set('timeline', timeline.slice(-200)); // 上限 200 条
     if (store && typeof store.append === 'function') {
-      try { store.append(entry); } catch (err) {
+      const notify = (err) => {
+        // 持久失败不阻断事件管线：经既有事件通道上报（同步异常与 rejected Promise 同等对待——P2 修复）
         try { bus.emit('ledger:persist.error', { error: String((err && err.message) || err), entry }); } catch (_) { /* 通知失败不再抛 */ }
-      }
+      };
+      let res = null;
+      try { res = store.append(entry); } catch (err) { notify(err); } // 同步异常（保持原同步语义，测试可同步断言）
+      if (res && typeof res.catch === 'function') res.catch(notify); // rejected Promise 不再静默逃逸
     }
   };
-  // 启动恢复：持久层是事实源，旧账本在前、本会话新事件在后，合并后仍守 200 上限
+  // 启动恢复（store.load 双契约归一——P2 修复）：同步返回数组或返回 Promise 均兼容；
+  // 恢复迭代/合并段在 then 内执行，异常统一落 .catch（恢复失败不阻断 runtime，降级为内存级）
   if (store && typeof store.load === 'function') {
     Promise.resolve()
       .then(() => store.load())
@@ -414,17 +459,29 @@ function applyRelationshipSignal(context, { delta = 0, reason = null, stage = nu
 }
 
 function wireRelationship(bus, context) {
+  // 「发布中」重入护栏（P3 修复）：relationship:changed 的监听方若再发关系信号（互激），
+  // 重入的信号处理器直接忽略，防止「信号→更新→广播→信号」递归回路。
+  let publishing = false;
   const off = Object.entries(RELATIONSHIP_SIGNALS).map(([channel, sig]) =>
     bus.on(channel, (payload) => {
-      const prev = { ...(context.get('relationship') || {}) };
-      const { delta, stage } = resolveRelationshipDelta(payload && payload.relationship_delta, sig.gain, prev);
-      const next = applyRelationshipSignal(context, { delta, reason: sig.reason, stage });
-      const changed = prev.stage !== next.stage || prev.intimacy !== next.intimacy;
-      // [0071] 更新结果经订阅通知机制广播 → 各视图据此对齐，避免出现不同视图显示不同关系状态
-      bus.emit('relationship:changed', {
-        stage: next.stage, intimacy: next.intimacy, reason: next.lastReason, changed,
-        prevStage: prev.stage, prevIntimacy: prev.intimacy,
-      });
+      if (publishing) {
+        console.warn(`[bwm] relationship re-entry suppressed on ${channel}`); // 审计痕迹：重入被拒绝
+        return;
+      }
+      publishing = true;
+      try {
+        const prev = { ...(context.get('relationship') || {}) };
+        const { delta, stage } = resolveRelationshipDelta(payload && payload.relationship_delta, sig.gain, prev);
+        const next = applyRelationshipSignal(context, { delta, reason: sig.reason, stage });
+        const changed = prev.stage !== next.stage || prev.intimacy !== next.intimacy;
+        // [0071] 更新结果经订阅通知机制广播 → 各视图据此对齐，避免出现不同视图显示不同关系状态
+        bus.emit('relationship:changed', {
+          stage: next.stage, intimacy: next.intimacy, reason: next.lastReason, changed,
+          prevStage: prev.stage, prevIntimacy: prev.intimacy,
+        });
+      } finally {
+        publishing = false;
+      }
     })
   );
   return () => off.forEach((d) => d());
@@ -434,29 +491,41 @@ function wireRelationship(bus, context) {
  * Shell 渲染层订阅 bus 'presence:state'（或 context.watch('presence')）应用视觉
  */
 function createPresenceMachine(bus, context) {
+  let resetTimer = null;
+  let generation = 0;
+  let disposed = false;
   const applyState = (state, transient) => {
+    clearTimeout(resetTimer);
+    resetTimer = null;
+    const currentGeneration = ++generation;
     context.set('presence', { ...context.get('presence'), state, at: new Date().toISOString() });
+    if (disposed || generation !== currentGeneration) return;
     bus.emit('presence:state', { state });
-    if (transient > 0) {
-      setTimeout(() => {
-        if ((context.get('presence') || {}).state === state) applyState('idle', 0);
+    if (transient > 0 && generation === currentGeneration && !disposed) {
+      resetTimer = setTimeout(() => {
+        if (!disposed && generation === currentGeneration) applyState('idle', 0);
       }, transient);
     }
   };
   const setPresence = (state, { transient = 0 } = {}) => {
-    if ((context.get('presence') || {}).state === state) return; // 幂等
+    if (disposed || (context.get('presence') || {}).state === state) return; // 幂等
     applyState(state, transient);
   };
   const off = [
-    bus.on('agent.thinking.start', () => setPresence('thinking')),
-    bus.on('agent.thinking.end', () => setPresence('idle')),
-    bus.on('agent.tool.call', () => setPresence('executing')),
-    bus.on('agent.tool.result', () => setPresence('thinking')),
-    bus.on('agent.task.success', () => setPresence('success', { transient: 1400 })),
-    bus.on('agent.task.failed', () => setPresence('error', { transient: 2000 })),
+    bus.on('agent.thinking.start', () => setPresence('thinking'), { replay: false }),
+    bus.on('agent.thinking.end', () => setPresence('idle'), { replay: false }),
+    bus.on('agent.tool.call', () => setPresence('executing'), { replay: false }),
+    bus.on('agent.tool.result', () => setPresence('thinking'), { replay: false }),
+    bus.on('agent.task.success', () => setPresence('success', { transient: 1400 }), { replay: false }),
+    bus.on('agent.task.failed', () => setPresence('error', { transient: 2000 }), { replay: false }),
   ];
   applyState('idle', 0); // 初始态
-  return () => off.forEach((d) => d());
+  return () => {
+    disposed = true;
+    generation++;
+    clearTimeout(resetTimer);
+    off.forEach(d => d());
+  };
 }
 
 /* ── 协议值域（BWM Protocol v1 §3：state.json 值域冻结，P1.4 迁入核心）──
@@ -533,6 +602,12 @@ function createRequestMachine(bus, context) {
  */
 function bridgePerceptionToLedger(ledger, update, opts = {}) {
   if (!ledger || !update) return { ok: false, error: 'missing_ledger_or_update' };
+  // 准入复核（P1 修复 · 家族边界：账本端独占最终准入）：仅当指令确实落在持久域（ledger）
+  // 且获准持久化（PERSIST）才可进账本；易失/延迟/拒绝指令被强行桥接时拒绝并如实返回，
+  // 持久化准入不可经桥接旁路。
+  if (update.domain !== 'ledger' || update.mode !== UPDATE_MODES.PERSIST) {
+    return { ok: false, error: 'not_persist_granted', domain: update.domain || null, mode: update.mode || null };
+  }
   const payload = update.payload || {};
   return ledger.submit(
     {
@@ -546,7 +621,10 @@ function bridgePerceptionToLedger(ledger, update, opts = {}) {
       relationScope: update.relationScope,
       salience: payload.salience == null ? 0 : payload.salience,
       confidence: opts.confidence == null ? 1 : opts.confidence,
-      userConfirmed: !!opts.userConfirmed,
+      // 确认标记透传（账本端 admit 二次门复核）：优先取调用方显式值，否则取路由指令携带的确认信息
+      userConfirmed: opts.userConfirmed != null
+        ? !!opts.userConfirmed
+        : (payload.sourceType === 'explicit_share' || payload.userConfirmed === true),
       at: update.at,
     },
     {

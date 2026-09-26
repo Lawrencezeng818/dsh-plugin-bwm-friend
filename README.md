@@ -106,7 +106,7 @@ node tests/s3-presence-smoke.cjs # presence 事件驱动
 - 记忆：规则启发式事实抽取（`FACT_PATTERNS`），未来上移 Memory Runtime（Context Governance）
 - 多宿主：当前适配 DSH web；Claude Desktop/Cursor 等宿主经 capability negotiation 降级运行（未实测）
 - 发布：`license: UNLICENSED`（私有）；开源策略 = 壳（Shell/Protocol/SDK）开放 + Runtime 核心闭源
-- 悬浮按钮拖动未实现（pointerup 重置坐标，静态定位）
+- ~~悬浮按钮拖动未实现~~ → 2026-09-26 已实现（拖动落点即新位，clamp 视口内；pointerup 不再重置坐标）
 
 ## 变更
 

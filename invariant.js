@@ -35,7 +35,9 @@ export const apply = (ctx) => {
     const reg = ctx.get('invariants'); // optional service（非 inject 声明）
     if (!reg || typeof reg.register !== 'function') return () => {};
     return Promise.resolve(reg.register(PACKAGE_NAME, install));
-  } catch {
+  } catch (e) {
+    // 注册失败可见（对齐 factgate.js 风格），不静默吞异常
+    console.error('[bwm-invariant] register failed', e);
     return Promise.resolve(() => {});
   }
 };

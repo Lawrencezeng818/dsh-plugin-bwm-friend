@@ -30,3 +30,28 @@ test('settings: normalize 保留已给字段并补默认', () => {
   assert.strictEqual(s.avatar.theme, '电竞男孩');
   assert.strictEqual(typeof s.avatar.persona, 'string');
 });
+
+/* ── factgate / wireLedger 校验（P2 修复：schema 定义 + 校验器 + 测试三面对齐）── */
+
+test('settings: factgate 合法域注册表通过', () => {
+  const r = validateSettings({
+    factgate: { domains: { 'patent-status': { label: '专利状态', source: 'local' }, 'e-receipt': { label: '电子回执', source: 'probe' } } },
+  });
+  assert.strictEqual(r.valid, true);
+  assert.deepStrictEqual(r.errors, []);
+});
+
+test('settings: factgate 非法结构被拒绝（非对象 / domains 非对象 / 域项缺字段）', () => {
+  assert.strictEqual(validateSettings({ factgate: 'x' }).valid, false, 'factgate 必须是对象');
+  assert.strictEqual(validateSettings({ factgate: { domains: [] } }).valid, false, 'domains 必须是对象（映射表）');
+  assert.strictEqual(validateSettings({ factgate: { domains: { d1: { label: 'x' } } } }).valid, false, '域项缺 source');
+  assert.strictEqual(validateSettings({ factgate: { domains: { d1: { label: '', source: 's' } } } }).valid, false, 'label 不得为空');
+});
+
+test('settings: wireLedger 数组放行、非数组拒绝（与 host 白名单一致）', () => {
+  assert.strictEqual(validateSettings({ wireLedger: ['identity', 'memory'] }).valid, true, '数组放行');
+  assert.deepStrictEqual(validateSettings({ wireLedger: [] }).errors, [], '空数组同样放行');
+  const r = validateSettings({ wireLedger: 'identity' });
+  assert.strictEqual(r.valid, false, '非数组 invalid');
+  assert.ok(r.errors.includes('wireLedger: must be array'), '错误信息与 host 侧一致');
+});

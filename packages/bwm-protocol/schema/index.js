@@ -74,6 +74,28 @@ export function validateSettings(s) {
     if (o.power.pauseOnBlur !== undefined && typeof o.power.pauseOnBlur !== 'boolean') errors.push('power.pauseOnBlur: boolean');
     if (o.power.pauseOnBattery !== undefined && typeof o.power.pauseOnBattery !== 'boolean') errors.push('power.pauseOnBattery: boolean');
   }
+  if (o.factgate !== undefined) {
+    // factgate（2026-09-22）：事实门控域注册表覆盖——domains: { 域ID: {label, source} }
+    if (typeof o.factgate !== 'object' || o.factgate === null || Array.isArray(o.factgate)) {
+      errors.push('factgate: must be object');
+    } else if (o.factgate.domains !== undefined) {
+      if (typeof o.factgate.domains !== 'object' || o.factgate.domains === null || Array.isArray(o.factgate.domains)) {
+        errors.push('factgate.domains: must be object');
+      } else {
+        for (const [id, d] of Object.entries(o.factgate.domains)) {
+          if (!d || typeof d !== 'object' || Array.isArray(d)
+            || typeof d.label !== 'string' || !d.label
+            || typeof d.source !== 'string' || !d.source) {
+            errors.push(`factgate.domains.${id}: must be {label, source} non-empty strings`);
+          }
+        }
+      }
+    }
+  }
+  if (o.wireLedger !== undefined && !Array.isArray(o.wireLedger)) {
+    // wireLedger（2026-09-25）：账本落盘白名单——数组放行（与 host 白名单一致），非数组 invalid
+    errors.push('wireLedger: must be array');
+  }
   return { valid: errors.length === 0, errors };
 }
 
@@ -81,7 +103,7 @@ export function validateSettings(s) {
 export function normalizeSettings(s) {
   const o = s && typeof s === 'object' ? s : {};
   const out = { ...DEFAULT_SETTINGS };
-  for (const key of ['account', 'avatar', 'voice', 'llm', 'ui', 'power']) {
+  for (const key of ['account', 'avatar', 'voice', 'llm', 'ui', 'power', 'factgate']) {
     if (o[key] && typeof o[key] === 'object') out[key] = { ...out[key], ...o[key] };
   }
   if (o.version !== undefined) out.version = o.version;

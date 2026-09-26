@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.7.2 (2026-09-26) · 发布硬化批次（全面代码审查 + 功能性审查收口，可发布门禁）
+
+> 三路并行只读深审（static-ui 陪伴页 / host 端点 / 闭源核心包）产出 8×P1 + 21×P2 + 38×P3，本批次修复全部 P1 与 P2 及可安全收口的 P3；行号级证据见审查报告。0.7.1 未单独定版，factgate companion 与本批次一并随 0.7.2 发布。
+
+### 安全 / 稳定性（host `lib/index.js`）
+- 🐛 **P1 ReDoS**：`/companion/chat` 是唯一无并发守卫的重端点，1MB 载荷直达 `我是.*的` 无界回溯正则可拖死与 DSH 同进程的事件循环——三层修复：消息入口截断 2000 字符 + 记忆抽取正则全部加界（`.{0,24}` 量级）+ chat 并发守卫 ≤4（429）
+- 🐛 **请求体 UTF-8 chunk 断裂**：readJsonBody 改 Buffer 收集后一次性 toString——原逐 chunk 字符串拼接把跨 chunk 的多字节汉字静默打成 U+FFFD 入库，且按 UTF-16 计数使 CJK 实际字节上限放大 ~3 倍；PUT /settings 消重改走同一通道（strictJson 400）
+- companionChat 上游 fetch 补 `AbortSignal.timeout(60s)`（全文件最后一处无超时 fetch）；启动预扫描 TDZ 静默死亡修复（preload 调用点移至 `watchedRoots` 声明后，失败落审计不再 `.catch(()=>{})` 吞掉）
+- serveMedia `bytes=-0` 按 RFC 7233 返回 416（原 206 全量）；promise 链补最终兜底（404 分支再抛曾是 unhandledRejection）；mp4Resolution 读失败也关 fd（泄漏）；memoryQueue 防毒护栏；PROACTIVE_CONTEXT 原型链查找改 `Object.hasOwn`；/status avatar null 守卫；runRealAgentTask 成功路径补 dispose；early-429 排空请求流防 keep-alive 断裂；settings 校验器缺席降级显式化（audit + health `components.settings.validator` 观测点）
+- 登录限速评审后**维持原契约**（按尝试计数）：改按失败计数会使限速在 dev 模式（任意凭据皆成功）永不可触发、也无法测试；60s 窗口自愈，正常用户连续 6 次登录的误杀属已裁决可接受取舍
+
+### 交互体验（`static-ui/` 陪伴页，历史对话反复提及的类别逐项收口）
+- 🐛 **额度徽章整会话不更新**：`quota.updated` 分支引用未定义变量 `msg` → ReferenceError 被 catch 吞（`msg`→`event`）
+- 🐛 **生成中断线输入框永久禁用**：busy 只在 WS 事件里解除——close 时复位 + 10 分钟客户端 watchdog 兜底
+- 🐛 **模板卡成倍重复**：loadTemplates 只追加不清空 + 默认卡重复绑定——入口 `replaceChildren()` 重建
+- 🐛 **删除自定义模板无确认**：删除前走 confirmDialog，删除中禁用按钮
+- 其余：更新版本号 innerHTML 转义（XSS）；发送防抖（响应创建前回车重复扣次）；头像上传失败回滚（对齐待机视频）；说话视频补 2GB 上限；服务离线 15s 循环 toast 改静默 pill；persona 加载失败禁存（防空文本覆盖服务端人格）；模板加载失败 toast+重试卡；声音克隆按钮防并发；上传区隐藏后 placeholder 死按钮修复；长回复 overflow-y:auto（移动端可读）；iOS 输入 16px 防聚焦放大；`:root` 补 `--accent`；模板卡禁用态；确认弹窗 Esc + `\n` 换行生效；向导弹窗恢复滚动；读操作 9 处补 ok 检查（fetchJsonOk 统一封装，401 语义不变）
+
+### 嵌入式壳层（`src/client.js`）
+- 🐛 **悬浮按钮拖动假实现**：pointerup 把 right/bottom 重置回初始值（README Known Limitations 根因）——拖动落点即新位并 clamp 视口内
+- 🐛 **自动滚动误判**：候选滚动容器收敛到会话区（centerCol 内），排除侧栏会话树与 composer dock（TodoPanel 列表）——原会把侧栏/任务列表强制滚到底、且任一非底部容器误触发全局暂停跟随
+- 🐛 **账本/上下文写入竞态**：ledger append、context persist、mode persist 三条「GET→合并→PUT」链并发交错互丢字段（账本条目静默丢失，专利4 持久链完整性）——统一 `queueConfigWrite` 串行链
+- 清理无效 CSS 声明 `child-shadow`（笔误）
+- 浏览器实测（3200 沙盒 + CDP）：模型菜单真实鼠标点击正常弹出、长模型名（DeepSeek-V4-Flash-Vision-Exp High）压力下 composer 无溢出无裁剪、发送键/边框完整、根路径 `/` 原生界面零侵扰——历史 P1（点模型名不弹菜单）/P4（发送键裁剪）确认由 0.7.x CSS 修复收口，本批次回归通过
+
+### 闭源核心包（专利实现证据）
+- 🐛 **P1 感知路由补偿失真**：`compensate(failed, 全量applied)` 对每个易失项重复同参调用——改逐项 `compensate(u, [v])`（测试曾只断言 length>0 恰好掩盖）
+- 🐛 **P1 会话销毁即失效破约**：closeSession 后 commit/route 照常 apply——入口补 SESSION_CLOSED 拒绝
+- 🐛 **P1 持久化准入旁路**：桥接函数不复核指令域与获准模式 + 账本 admit 无确认门——双门修复（`not_persist_granted` / `perception_not_user_confirmed`），「强行桥接」测试分支从永不可达改为真实断言
+- 两套账本 store 契约统一（异步 append 拒绝→回滚/上报、load 双契约归一）；事件总线 route/回放三处异常隔离；commit 持久失败剩余项入 shelved 不再静默丢弃；DEFER 过期丢弃切断死循环；路由器四处无界增长加界（closed sessions 50 / completedRounds 100 / audit 500 / lateQueue 200）；recentTopics 裁剪方向反修（达上限后新话题进不来）；hydrate 浅拷贝隔离；verify NaN 篡改不再失明；时间混合类型排序归一；wireRelationship 重入护栏；invariant 降级显式化
+- 测试：runtime-core 131→**149 全绿**、protocol 13→**19 全绿**（+24 项新契约测试）
+
+### 发布工程
+- README Known Limitations「悬浮按钮拖动未实现」关闭；版本 0.7.2（0.7.1 未单独定版一并发布）
+
+## 0.7.1 (2026-09-21) · factgate 事实门控 companion（专利→生产力：会话层执行门控）
+
+- **新增 `factgate.js` companion**（bundle patch 行 `bwm-friend-factgate`，真实上下文加载）：把事件内核"门控获准帧"（runtime-core index.js:87）装到 harness 会话层——`fact_probe`（权威源探测）/ `fact_assert`（断言核验门控：ADMITTED 发票据、BLOCKED 拦截+理由）/ `fact_ledger`（审计账本：单调序号、上限500滚动、每域 retained 票据）/ **全局写保护守卫**（`tools.guard` 普通上下文注册=全局生效、单调不可翻案：权威源文件对 write/edit 只读）
+- **事实域 v1 内置 4 域**：patent-status（SSOT）/ package-compliance（递交包 SHA256SUMS）/ env-config（DSH_HOME AGENTS.md）/ e-receipt（SSOT 第7行受理状态）；settings 化配置列 v2
+- **架构勘误记录**：动态会话插件沙箱门面剥掉 `tools.guard`（cordis-host-runner/guard.ts 只暴露 register/schemas/get，防绕过单调守卫）——写保护**只能部署级挂载**；会话内原型（fgate-2/pkg-5）按"显式失灵不静默"特性检测降级验证了同款限制
+- **fs/tools 可选服务纪律**：ctx.get + 特性检测，缺席显式降级报告，绝不静默放行（invariant 同款教训）；工具逐具 try/catch 注册，单具被拒不拖垮其余
+- 经验判例：`/Users/zengtian/projects/memory/workflow/20260921-DSH-动态插件开发四暗礁与契约先行节奏.md`（defineTool 工位/参数根开放/输出 schema 显式/运行期特性检测）
+- **factgate settings 化（0.7.1 增补）**：域注册表支持配置覆盖——主插件 settings PUT 白名单/类型守卫/深合并放行 `factgate` 键，bwm-protocol schema 增补 `factgate.domains` 校验（{label, source} 非空字符串，非法逐键拒绝）；companion 启动时读 `~/.dsh-bwm-friend/config.json` 覆盖内置 4 域，缺项/失败回退默认（不阻断加载）
+- **发布链全绿（2026-09-22）**：core 131/131 · artifact PASS · host 38/38（沙盒 3200）· e2e ✓ · pack ALL PASS · fresh ALL PASS；settings 通道端到端实测 PUT→落盘→GET 三连过
+- **SG 8089 门户链路退役（创世者裁决）**：DNS 实测直指广州，SG 不在服务路径；容器摘除、路由标记 retired、备份 `SG:/opt/boss-portal-retired-backup-20260922.tar.gz`；架构 SSOT（BOSS_THREE_NODE_TOPOLOGY.md）与脚本头同步更新
+
 ## 0.7.0 (2026-09-11) · Perception Router（专利5 实现证据 / 跨域路由与一致性编排）
 
 - **新增 `createPerceptionRouter()`**（`packages/bwm-runtime-core/src/perception-router.js`，纯逻辑无 I/O）：感知事件的**跨状态域路由与一致性编排**——专利5 交底书 v0.3 §四 六步骨架的可运行实现

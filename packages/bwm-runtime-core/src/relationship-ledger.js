@@ -101,7 +101,15 @@ function clamp(x, lo, hi) {
 }
 
 function eventTimeOf(entry) {
-  return entry.eventTime != null ? entry.eventTime : (entry.at != null ? entry.at : 0);
+  // 时间归一化为数值毫秒（P3 修复）：数值原样（非有限数回退 0）；ISO 字符串 parse 成 ms（失败回退 0）。
+  // 修复前字符串与数值直接相减得 NaN → 排序/区间过滤失序；归一化后排序稳定、时间混合类型安全。
+  const t = entry.eventTime != null ? entry.eventTime : entry.at;
+  if (typeof t === 'number') return Number.isFinite(t) ? t : 0;
+  if (typeof t === 'string') {
+    const ms = Date.parse(t);
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  return 0;
 }
 
 /**
@@ -146,6 +154,7 @@ function createRelationshipLedger(opts = {}) {
   const entries = [];        // 追加式关系账本（内存权威视图）
   const seen = new Set();    // 幂等：已提交的共享事件标识
   const pending = new Set(); // 并发保护：正在持久化的标识（未提交前一律视为重复）
+  let lastPersistError = null; // 内部错误标志（P2 修复）：异步持久失败可见（无既有错误事件通道 → console.error + 标志）
 
   function nextEventId() {
     seq += 1;
@@ -183,6 +192,12 @@ function createRelationshipLedger(opts = {}) {
     if (!(Number(event.confidence) >= minConfidence)) reasons.push('below_confidence_gate');
     if (!(Number(event.salience) >= minSalience)) reasons.push('below_salience_gate');
     if (!event.privacyAllowed) reasons.push('privacy_denied');
+    // 感知来源条目的显式确认门（P1 修复 · 与路由侧持久化准入一致）：
+    // 无用户确认的感知条目拒绝入账（防止持久化准入经伪造的 persist 指令旁路）；
+    // 普通 agent 事件路径（evidenceSource=runtime 等）不受影响。
+    if (event.evidenceSource === 'perception' && !event.userConfirmed) {
+      reasons.push('perception_not_user_confirmed');
+    }
     const factor = evidenceFactorOf(event, event.evidenceSource, rules, { unknownEvidencePolicy });
     if (factor === null) reasons.push(LEDGER_ERRORS.UNKNOWN_EVIDENCE_SOURCE);
     const ok = reasons.length === 0;
@@ -341,8 +356,9 @@ function createRelationshipLedger(opts = {}) {
     // 先落持久层，成功后才更新内存权威视图 —— 保证"持久失败不提交"
     if (store && typeof store.append === 'function') {
       pending.add(eventId);
+      let res = null;
       try {
-        store.append(entry);
+        res = store.append(entry);
       } catch (err) {
         pending.delete(eventId);
         return {
@@ -352,6 +368,18 @@ function createRelationshipLedger(opts = {}) {
           persisted: false,
           cause: String((err && err.message) || err),
         };
+      }
+      if (res && typeof res.catch === 'function') {
+        // append 返回 rejected Promise（P2 修复）：失败异步抵达 → 从 entries/seen 回滚该条并清 pending，
+        // 保持「持久失败不提交」；不静默逃逸（console.error + 内部标志）
+        res.catch((err) => {
+          pending.delete(eventId);
+          const i = entries.indexOf(entry);
+          if (i >= 0) entries.splice(i, 1);
+          seen.delete(eventId);
+          lastPersistError = String((err && err.message) || err);
+          console.error('[bwm-ledger] persist failed:', lastPersistError);
+        });
       }
       pending.delete(eventId);
     }
@@ -392,7 +420,9 @@ function createRelationshipLedger(opts = {}) {
   function verify(o = {}) {
     const mismatches = [];
     let checkedCount = 0;
-    for (const e of entries) {
+    // limit 真实截断扫描（P3 修复：此前仅事后截断计数，扫描仍全量）
+    const limit = o.limit == null ? entries.length : Math.max(0, Number(o.limit) || 0);
+    for (const e of entries.slice(0, limit)) {
       const rules = registry[e.rulesVersion];
       if (!rules) {
         mismatches.push({ eventId: e.eventId, reason: LEDGER_ERRORS.UNKNOWN_RULE_VERSION });
@@ -410,18 +440,19 @@ function createRelationshipLedger(opts = {}) {
       let same = true;
       for (const dim of RELATIONSHIP_DIMENSIONS) {
         const expected = re.delta[dim];
-        const actual = (e.delta && e.delta[dim]) || 0;
-        if (Math.abs(expected - actual) > DELTA_EPSILON) {
+        const raw = e.delta ? e.delta[dim] : undefined;
+        const actual = raw == null ? 0 : raw; // 缺失维度按 0（既有口径）
+        // Δ 为非有限数（NaN/Infinity）判为篡改（P3 修复：原 `|| 0` 会把 NaN 吞成 0 掩盖篡改）
+        if (!Number.isFinite(actual) || Math.abs(expected - actual) > DELTA_EPSILON) {
           same = false;
           mismatches.push({ eventId: e.eventId, dimension: dim, expected, actual });
         }
       }
       if (same) checkedCount += 1;
     }
-    const limit = o.limit == null ? entries.length : o.limit;
     return {
       ok: mismatches.length === 0,
-      checked: Math.min(checkedCount, limit),
+      checked: checkedCount,
       total: entries.length,
       mismatches,
     };
@@ -451,24 +482,36 @@ function createRelationshipLedger(opts = {}) {
     return { ok: true, state, steps, evaluationTime: T };
   }
 
-  /* ── 持久层恢复（重启后幂等索引一并恢复）── */
+  /* ── 持久层恢复（store.load 双契约归一——P2 修复：同步数组或 Promise 均兼容；对外结果形状不变）── */
   function restore() {
     if (!store || typeof store.load !== 'function') return { ok: false, error: LEDGER_ERRORS.NO_STORE };
-    let rows;
+    let loaded;
     try {
-      rows = store.load() || [];
+      loaded = store.load();
     } catch (err) {
       return { ok: false, error: LEDGER_ERRORS.LOAD_FAILED, cause: String((err && err.message) || err) };
     }
-    entries.length = 0;
-    seen.clear();
-    pending.clear();
-    for (const e of rows) {
-      entries.push(e);
-      seen.add(e.eventId);
+    const applyRows = (rows) => {
+      try {
+        entries.length = 0;
+        seen.clear();
+        pending.clear();
+        for (const e of rows || []) {
+          entries.push(e);
+          seen.add(e.eventId);
+        }
+        entries.sort((a, b) => eventTimeOf(a) - eventTimeOf(b));
+        return { ok: true, restored: entries.length };
+      } catch (err) {
+        // try/catch 覆盖迭代段：脏数据（不可迭代/坏条目）明确报 LOAD_FAILED，不抛裸异常
+        return { ok: false, error: LEDGER_ERRORS.LOAD_FAILED, cause: String((err && err.message) || err) };
+      }
+    };
+    if (loaded && typeof loaded.then === 'function') {
+      // 异步契约：返回 Promise（结果对象形状与同步路径一致）
+      return loaded.then(applyRows, (err) => ({ ok: false, error: LEDGER_ERRORS.LOAD_FAILED, cause: String((err && err.message) || err) }));
     }
-    entries.sort((a, b) => eventTimeOf(a) - eventTimeOf(b));
-    return { ok: true, restored: entries.length };
+    return applyRows(loaded); // 同步契约：行为与旧版一致（直接返回结果对象）
   }
 
   /* ── 关系资产查询（读模型，可重建；不作为原始事实条目）── */
@@ -516,6 +559,7 @@ function createRelationshipLedger(opts = {}) {
     all,
     size,
     has,
+    lastPersistError: () => lastPersistError, // 内部错误标志读取口（异步持久失败可见）
     rulesVersion: defaultRulesVersion,
   };
 }
