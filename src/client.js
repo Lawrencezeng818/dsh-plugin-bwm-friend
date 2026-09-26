@@ -832,35 +832,44 @@ function applyEmbeddedHarness(ctx) {
       if (e.data.openSidebar !== undefined && sb) sb.classList.toggle('bwm-emb-open', !!e.data.openSidebar);
     }
     // 主 iframe：☰ 工作区弹窗选择了会话 → 切换本 iframe 会话
-    // 目标会话可能折叠在未展开的文件夹里 → 先沿 folders 链逐层展开（等 React 渲染）再点；
-    // 目标已可见则直接点（快速路径）。
+    // 2026-09-26 修复「首次切换静默失败」（用户实测：第一次切不过、第二次成功）：
+    // 原实现目标可见才点、文件夹链展开后只等固定 400ms 单次查找即放弃——真实工作区
+    // 会话量大、React 渲染慢时首轮必失败（第二次因首轮已把文件夹点开才成功）。
+    // 改为轮询重试：每轮先找目标（可见即点），找不到则继续展开 folders 链中未展开层，
+    // 300ms × 16 ≈ 5s 上限，不无限循环。
     if (e.data && e.data.type === 'bwm-switch-session' && !isPop) {
       const title = e.data.title;
       const folders = Array.isArray(e.data.folders) ? e.data.folders : [];
       const findTarget = () => [...document.querySelectorAll('[role=treeitem]')]
         .find((t) => String(t.innerText || '').split('\n')[0] === title);
-      const target = findTarget();
-      if (target) {
-        target.click();
-      } else if (folders.length) {
-        const chain = folders.slice();
-        const expandNext = () => {
-          const name = chain.shift();
-          if (!name) { const t2 = findTarget(); if (t2) t2.click(); return; }
+      let tries = 0;
+      const attempt = () => {
+        const target = findTarget();
+        if (target) { target.click(); return; }
+        if (++tries > 16) return; // 5s 上限：超时放弃（不抢原生行为，也不无限循环）
+        if (folders.length) {
+          // 扁平虚拟树：只需展开最近一层文件夹；每轮重查（树可能整树重渲染）
           const f = [...document.querySelectorAll('[role="treeitem"]')]
-            .find((t) => String(t.innerText || '').split('\n')[0] === name);
-          if (f && f.getAttribute('aria-expanded') === 'false') f.click(); // 展开该层
-          setTimeout(expandNext, 400); // 等 React 渲染子项
-        };
-        expandNext();
-      }
+            .find((t) => String(t.innerText || '').split('\n')[0] === folders[0] && t.getAttribute('aria-expanded') === 'false');
+          if (f) f.click();
+        }
+        setTimeout(attempt, 300);
+      };
+      attempt();
     }
     // 2026-09-02 fix：主 iframe 收「新会话」→ 点击本 iframe 原生「新会话」按钮
     // （走原生新建+切换流程，与原生 DSH 行为一致；不直接调 API 避免绕过 UI 状态）
+    // 2026-09-26 同类加固：按钮未渲染时轮询重试（原单次查找静默失败——与会话切换同一类时序缺陷）
     if (e.data && e.data.type === 'bwm-new-session' && !isPop) {
-      const btn = [...document.querySelectorAll('button')]
-        .find((b) => (b.textContent || '').trim() === '新会话' || (b.getAttribute('aria-label') || '') === '新建会话');
-      if (btn) btn.click();
+      let ntries = 0;
+      const nattempt = () => {
+        const btn = [...document.querySelectorAll('button')]
+          .find((b) => (b.textContent || '').trim() === '新会话' || (b.getAttribute('aria-label') || '') === '新建会话');
+        if (btn) { btn.click(); return; }
+        if (++ntries > 8) return; // ~2.4s 上限
+        setTimeout(nattempt, 300);
+      };
+      nattempt();
     }
   });
   // pop 弹窗 iframe：点击叶子会话 → 通知父页面切换主 iframe（弹窗保持打开，不关闭）
