@@ -180,7 +180,7 @@ test('request: reply → replying；end → idle（完整生命周期）', () =>
   assert.strictEqual(rs.requestId, null);
 });
 
-/* ── 2026-09-10 B2 反超第一步：wireLedger 落盘（专利4 硬门槛链）──
+/* ── 2026-09-10 B2 反超第一步：wireLedger 落盘（硬门槛链）──
  * 链：Action→Event→Outcome→Ledger entry→store.append（persist）→ 新 runtime store.load（reload）
  *    → context.timeline 恢复 → Agent 可读（"Agent can use it"）
  */

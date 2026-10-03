@@ -7,7 +7,7 @@ const {
   PERCEPTION_ERRORS,
 } = require('../src/perception-router.js');
 
-/* ── 专利5 交底书 v0.3 §八：跨域一致性编排证据（非采样 Benchmark）── */
+/* ── 跨域一致性编排证据（非采样 Benchmark）── */
 
 function makeClock(t0 = 1_000_000) {
   let t = t0;

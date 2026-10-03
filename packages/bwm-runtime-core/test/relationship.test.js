@@ -11,7 +11,7 @@ const {
   PERSIST_DOMAINS,
 } = require('../src/index.js');
 
-/* ── 关系域（专利1 说明书 [0041]：至少包括关系状态字段与亲密度字段）── */
+/* ── 关系域（至少包括关系状态字段与亲密度字段）── */
 
 test('[0041] 关系域存在，且至少含关系状态字段与亲密度字段', () => {
   const runtime = createRuntime();
@@ -40,7 +40,7 @@ test('[0041] 关系状态由亲密度经阈值表映射（阶段单调不回退�
   }
 });
 
-/* ── [0071] 交互行为产生行为事件 → 触发关系域更新 → 订阅通知广播 ── */
+/* ── 交互行为产生行为事件 → 触发关系域更新 → 订阅通知广播 ── */
 
 test('[0071] 行为事件驱动关系域更新：agent.task.success 提升亲密度', () => {
   const runtime = createRuntime();
@@ -155,7 +155,7 @@ test('亲密度上下界收敛（不下穿 0、不上穿 max）', () => {
   assert.strictEqual(runtime.context.get('relationship').stage, 'bonded');
 });
 
-/* ── 载荷兼容（专利4 关系语义前向兼容）── */
+/* ── 载荷兼容（关系语义前向兼容）── */
 
 test('relationship_delta 数字 → 直接采纳为增量', () => {
   const runtime = createRuntime();
@@ -194,7 +194,7 @@ test('applyRelationshipSignal 可独立调用（纯函数式更新，返回最�
   assert.deepStrictEqual(runtime.context.get('relationship'), next, '上下文与返回值一致');
 });
 
-/* ── 持久化与域清单一致性（权4：可序列化持久化；[0048] 可扩展） ── */
+/* ── 持久化与域清单一致性（可序列化持久化；字段可扩展） ── */
 
 test('持久化：关系域属 persist 域，persistSnapshot 携带，hydrate 恢复（权4）', () => {
   const runtime = createRuntime();

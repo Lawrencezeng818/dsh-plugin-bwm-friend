@@ -10,7 +10,7 @@
  * 后续引入真正 bundler 后拆分 src/event-bus.js / src/runtime.js / src/index.js。
  */
 
-/* ── 感知路由器（专利5 交底书 v0.3 §四 实现；跨域路由与一致性编排，纯逻辑）── */
+/* ── 感知路由器（跨域路由与一致性编排，纯逻辑）── */
 const {
   createPerceptionRouter,
   DOMAIN_CLASS,
@@ -18,7 +18,7 @@ const {
   PERCEPTION_ERRORS,
 } = require('./perception-router.js');
 
-/* ── 关系账本（专利4 权1 六步机制链：准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入，可验证可重放）── */
+/* ── 关系账本（六步机制链：准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入，可验证可重放）── */
 const {
   createRelationshipLedger,
   RULE_TABLES,
@@ -129,9 +129,9 @@ function createEventBus() {
   };
 }
 
-/* ── 关系域策略（专利1 说明书 [0041]/[0071]）──
- * [0041] 关系域至少包括「关系状态」字段与「亲密度」字段；由交互行为事件驱动更新，结果各视图共享。
- * [0071] 交互行为产生行为事件 → 事件写入时间线域 → 触发关系域更新 → 经订阅通知广播至各视图。
+/* ── 关系域策略 ──
+ * 关系域至少包括「关系状态」字段与「亲密度」字段；由交互行为事件驱动更新，结果各视图共享。
+ * 交互行为产生行为事件 → 事件写入时间线域 → 触发关系域更新 → 经订阅通知广播至各视图。
  * 阈值表把亲密度映射为关系状态阶段；决策私有（阈值/增益不外泄为协议面）。
  */
 const RELATIONSHIP_STAGES = Object.freeze(['new', 'acquaintance', 'familiar', 'close', 'bonded']);
@@ -144,11 +144,11 @@ const RELATIONSHIP_POLICY = Object.freeze({
 
 /* ── 上下文域清单：单一来源（消除计数漂移）──
  * 历史缺陷：context-govern 能力约束里写死 `domains: 8`，而 2026-08-24 引入 capability 域后
- * 实际域数已为 9；说明书侧也曾出现"包括八个域"却紧接着列举九项。计数分散在多处 = 必然漂移。
+ * 实际域数已为 9；文档侧也曾出现"包括八个域"却紧接着列举九项。计数分散在多处 = 必然漂移。
  * 现由本清单唯一推导：createAgentContext 初值、context-govern 的 domains 计数、测试断言均引用
  * CONTEXT_DOMAINS。新增域只需在本表加一行。
- * 与专利1 说明书 [0039]–[0047] 的九个域一一同名；capability 为实现内部域
- * （权利要求用"至少包括"表述，不构成支持性缺陷）。
+ * 九个域与产品规格文档一一同名；capability 为实现内部域
+ * （域清单采用"至少包括"的开放式表述，便于扩展）。
  */
 const CONTEXT_DOMAIN_INIT = Object.freeze({
   identity: {},
@@ -249,8 +249,8 @@ const PERSIST_DOMAINS = Object.entries(DOMAIN_POLICY)
  * 域数与域清单以 CONTEXT_DOMAINS 为唯一来源（不在此处硬写计数）。
  * ownership 模型 v1（docs/BWM-CONTEXT-CONTRACT-v1.md）：
  *   runtime 域（Shell 只读）：identity/personality/relationship/memory/preferences/timeline/presence/capability
- *     ——relationship 归 runtime：权1 要求各视图「读取到同一智能体状态」，
- *       关系状态由行为事件驱动（说明书 [0071]）而非视图直写，故 Shell 无写权。
+ *     ——relationship 归 runtime：要求各视图「读取到同一智能体状态」，
+ *       关系状态由行为事件驱动而非视图直写，故 Shell 无写权。
  *   shared 域（双方可写）：conversation/tasks（业务数据）
  */
 const CONTEXT_SCHEMA_VERSION = '1.0';
@@ -335,18 +335,18 @@ function nextVersion(v) {
 
 /* ── Ledger Runtime（P1.4：Event→Context→Ledger，Agent 行为生命周期）──
  * Agent 经历（timeline）与任务状态（tasks）由事件驱动更新；timeline 即 P6 读模型
- * 2026-09-10 B2 反超第一步（专利4 实施例链：Action→Event→Outcome→Ledger→persist→reload→Agent 可用）：
+ * 2026-09-10 B2 反超第一步（实现链：Action→Event→Outcome→Ledger→persist→reload→Agent 可用）：
  *   可选 opts.store = { append(entry), load(): Promise<entry[]> } —— 逐事件写透 + 启动恢复；
  *   store 由 Shell 提供（JSON-in-settings / 未来宿主侧 JSONL/SQL P6），core 保持纯逻辑无 I/O。
  *   append 失败不阻断事件管线：emit 'ledger:persist.error'；load 失败静默（运行态照常）。
  *   timeline 仍归 DOMAIN_POLICY 'runtime'（快照不含）——账本走独立 store，不混入快照通道。
  */
-/* ── 任务域更新（专利1 [0043]：任务域表征「当前任务状态与最近任务状态」）──
+/* ── 任务域更新（任务域表征「当前任务状态与最近任务状态」）──
  * 历史缺陷 F2（2026-09-13 外部评审核验坐实）：原实现以 context.set('tasks', {last,taskId,at})
  *   整体替换，抹掉视图写入的 pending（当前任务），使「当前任务状态」在事件后丢失，
- *   权1「当前任务状态与最近任务状态」因此零实测支撑。
+ *   「当前任务状态与最近任务状态」因此零实测支撑。
  * 现为合并写：保留既有字段；pending 移出已完成项；recent 记录最近完成列表（上限 10）。
- * 与关系域同一模式，满足 [0048] 字段可扩展。
+ * 与关系域同一模式，满足字段可扩展要求。
  */
 function updateTaskState(context, { taskId = null, outcome = null, at = null } = {}) {
   const raw = context.get('tasks');
@@ -367,7 +367,7 @@ function wireLedger(bus, context, opts = {}) {
   const record = (actionType, detail) => {
     const d = detail || {};
     const entry = { action_type: actionType, outcome: d.outcome || 'success', summary: d.summary || '', at: new Date().toISOString() };
-    // 透传未来语义字段（relationship_delta/emotion_context 等，专利4）——JSON 安全过滤
+    // 透传未来语义字段（relationship_delta/emotion_context 等关系语义）——JSON 安全过滤
     for (const k of Object.keys(d)) {
       if (!(k in entry) && d[k] !== undefined && typeof d[k] !== 'function') entry[k] = d[k];
     }
@@ -406,15 +406,15 @@ function wireLedger(bus, context, opts = {}) {
   return () => off.forEach((d) => d());
 }
 
-/* ── Relationship Runtime（专利1 [0041]/[0071]：关系域由行为事件驱动更新）──
- * 链路（[0071] 逐字对应）：
+/* ── Relationship Runtime（关系域由行为事件驱动更新）──
+ * 链路：
  *   交互行为 → 行为事件（agent.task.success 等）→ 事件写入时间线域（wireLedger）
  *            → 触发关系域更新（本函数）→ 经订阅通知机制广播至已订阅的各视图
  * 写权归属 Runtime：CONTEXT_RUNTIME_DOMAINS 含 relationship，视图 shellSet 被拒——
- *   与权1「各视图读取到同一智能体状态」一致（视图是消费者，不是关系状态的写入者）。
+ *   与「各视图读取到同一智能体状态」的一致性约束相符（视图是消费者，不是关系状态的写入者）。
  * 合并写而非整体替换：F2 教训——wireLedger 曾以整体替换写 tasks，抹掉既有字段；
- *   关系域字段可扩展（[0048]），必须保留既有字段。
- * 载荷兼容（专利4 关系语义前向兼容）：relationship_delta 可为数字，或 { delta | intimacy | stage }。
+ *   关系域字段可扩展，必须保留既有字段。
+ * 载荷兼容（关系语义前向兼容）：relationship_delta 可为数字，或 { delta | intimacy | stage }。
  */
 const RELATIONSHIP_SIGNALS = Object.freeze({
   'agent.task.success': { gain: 1, reason: 'task_success' },
@@ -474,7 +474,7 @@ function wireRelationship(bus, context) {
         const { delta, stage } = resolveRelationshipDelta(payload && payload.relationship_delta, sig.gain, prev);
         const next = applyRelationshipSignal(context, { delta, reason: sig.reason, stage });
         const changed = prev.stage !== next.stage || prev.intimacy !== next.intimacy;
-        // [0071] 更新结果经订阅通知机制广播 → 各视图据此对齐，避免出现不同视图显示不同关系状态
+        // 更新结果经订阅通知机制广播 → 各视图据此对齐，避免出现不同视图显示不同关系状态
         bus.emit('relationship:changed', {
           stage: next.stage, intimacy: next.intimacy, reason: next.lastReason, changed,
           prevStage: prev.stage, prevIntimacy: prev.intimacy,
@@ -594,7 +594,7 @@ function createRequestMachine(bus, context) {
 }
 
 /**
- * 家族边界接线（专利4 ⇄ 专利5）：把感知路由器产出的「候选写入指令」消费为关系账本条目。
+ * 感知-账本边界接线：把感知路由器产出的「候选写入指令」消费为关系账本条目。
  *
  * 感知路由器只决策"某域是否允许写入"，**不做关系增量计算、不写关系账本**（其文件头声明）；
  * 本函数即那条声明所指的「账本端」——准入后的确定性增量计算与账本写入由关系账本模块独占。
@@ -646,10 +646,10 @@ function createRuntime(opts = {}) {
   const context = createAgentContext();
   context.set('identity', { ...IDENTITY_PRESET });           // Identity Runtime：我是谁
   context.set('personality', { ...PERSONALITY_PRESET });     // 人格特征
-  // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2/专利4 实施例）
+  // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2 实现链）
   wireLedger(bus, context, opts.ledger ? { store: opts.ledger } : {});   // Ledger Runtime（事件 → timeline/tasks）
-  wireRelationship(bus, context);      // Relationship Runtime（行为事件 → 关系状态/亲密度；专利1 [0071]）
-  // Relationship Ledger（专利4 权1 六步机制链）：候选事件 → 准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入
+  wireRelationship(bus, context);      // Relationship Runtime（行为事件 → 关系状态/亲密度）
+  // Relationship Ledger（六步机制链）：候选事件 → 准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入
   const relationshipLedger = createRelationshipLedger(opts.relationshipLedger || {});
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
   createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
@@ -659,7 +659,7 @@ function createRuntime(opts = {}) {
     version: '1.0',
     bus,       // 事件总线（Shell 订阅渲染）
     context,   // 共享上下文（Shell 只读 runtime 域；shellSet 写 shared 域）
-    relationshipLedger, // 关系账本（专利4：可验证/可重放的关系资产；查询与重放由调用方使用）
+    relationshipLedger, // 关系账本（可验证/可重放的关系资产；查询与重放由调用方使用）
     hydrateContext(raw) { context.hydrate(raw); }, // 快照恢复（runtime 内部，绕过 ownership）
     // Runtime v1.1：持久化快照（只含 persist 域——运行态不落盘，决策在 Runtime）
     persistSnapshot() {
@@ -730,7 +730,7 @@ module.exports = {
   negotiate,
   compareVersion,
   RUNTIME_CAPABILITIES,
-  // 感知路由器（专利5 v0.3）：感知事件的跨状态域路由与一致性编排
+  // 感知路由器：感知事件的跨状态域路由与一致性编排
   createPerceptionRouter,
   DOMAIN_CLASS,
   UPDATE_MODES,

@@ -536,7 +536,6 @@ const HISTORY_LEGACY_KEY = "cyber_girlfriend.chat.history.v1";
 const HISTORY_MAX = 100;
 
 // 身份一致性索引：聊天记录（记忆状态）按模板（数字分身身份实例）隔离——
-// 专利《基于身份一致性索引的数字分身跨模块状态同步运行方法及系统》权利要求3：
 // 记忆状态不是独立历史数据，而是与身份实例关联。
 function historyKeyForTemplate(template) {
   const t = String(template || "").trim() || "default";
@@ -2628,7 +2627,7 @@ async function initialize() {
     loadTemplates();
     loadVoices();
     await loadPersona();
-    // 身份一致性索引：先拿到当前模板名，再加载该模板的独立聊天记录（专利权利要求3：记忆随身份实例）
+    // 身份一致性索引：先拿到当前模板名，再加载该模板的独立聊天记录（记忆随身份实例）
     state.history = loadHistory();
     renderHistory();
     initAuth();

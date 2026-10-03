@@ -4,7 +4,7 @@ const { createPerceptionRouter } = require('../src/perception-router.js');
 const { createRelationshipLedger } = require('../src/relationship-ledger.js');
 const { bridgePerceptionToLedger } = require('../src/index.js');
 
-/* ── 家族边界接线（专利4 ⇄ 专利5）：感知路由「候选写入指令」→ 关系账本写入 ── */
+/* ── 感知-账本边界接线：感知路由「候选写入指令」→ 关系账本写入 ── */
 
 function makeClock(t0 = 1_700_000_000_000) {
   let t = t0;

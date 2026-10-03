@@ -7,7 +7,7 @@ const {
   evidenceFactorOf,
 } = require('../src/relationship-ledger.js');
 
-/* ── 专利4 权1 七步机制链：契约证据（非界面测试）── */
+/* ── 七步机制链：契约证据（非界面测试）── */
 
 const DAY = 86400000;
 
