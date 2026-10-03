@@ -1,0 +1,29 @@
+# .npmignore — 发布排除冗余防线（P0-2 打包门禁 · 2026-10-03）
+#
+# 定位：与根 package.json 的 files 白名单构成双保险。
+#
+# ⚠️ 实测边界（npm 11.12.1）：files 数组的优先级高于 .npmignore——
+# 若未来有人把目录级 "packages" 加回 files，本文件的 packages/ 规则
+# 拦不住它（实验：files=["packages"] + 本规则 → bwm-runtime-core 照进 tarball）。
+# 因此真正的硬门禁是 scripts/audit-release.mjs（prepublishOnly 强制执行），
+# 本文件是第一道成本为零的冗余滤网，不是最后防线。
+#
+# 注：以下多数路径本就不在 files 白名单内，此处显式列出以防 files 未来扩散。
+
+# 源码与开发目录（packages/ 为专利核心 bwm-runtime-core 所在，绝不可整目录回潮）
+packages/
+src/
+examples/
+tests/
+scripts/
+release/
+node_modules/
+
+# 本地构建产物与历史 tarball
+*.tgz
+
+# 本机日志与决策杂项（不入包）
+restart-*.log
+restart-*.txt
+决策记录_*.md
+scripts/fix-3080-mimo-key.sh
