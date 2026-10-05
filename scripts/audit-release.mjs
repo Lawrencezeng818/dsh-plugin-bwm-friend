@@ -25,6 +25,12 @@
  *     另加 verifyEvidenceMarked——0.6.0 全量判定 = 红 且红由 a/b 类所致。
  *   - 内部 npm pack 加 --ignore-scripts（配合 package.json prepack 钩子，防递归）。
  *
+ * R1 返工（2026-10-06 · 返工单低修2）：
+ *   - --expect-blocked 冻结期放行条件收紧：a+b===0 ∧ F/c>0 ∧ **无 P-word 命中**
+ *     （P-word＝随包禁专利字样核心政策，冻结期亦不放行；P-sec/P-app/P-pub 维持原豁免语义，
+ *     即冻结期红牌可由其所致但不计为放行所需的内核守卫红）。解冻切换条款见
+ *     docs/发布政策_随包内容禁专利字样_v1.0.md 第四节（解冻动作清单首项 = prepack 切回严格口径）。
+ *
  * 用法:
  *   node scripts/audit-release.mjs                  # 审计真实产物；FAIL → exit 1（发布阻断）
  *   node scripts/audit-release.mjs --expect-blocked # 冻结期：预期红牌 → exit 0；转绿 → exit 1 提示核查
@@ -185,7 +191,7 @@ function matchFingerprint(trimmedLines, fp) {
 
 function auditExtracted(extractRoot, label) {
   const files = walk(join(extractRoot, 'package'), join(extractRoot, 'package'));
-  const violations = { a: [], b: [], c: [], F: [], P: [], exemptHits: [] };
+  const violations = { a: [], b: [], c: [], F: [], P: [], Pword: [], exemptHits: [] };
   const scanFailures = [];
 
   for (const f of files) {
@@ -237,9 +243,10 @@ function auditExtracted(extractRoot, label) {
         if (p.re.test(line)) violations.P.push(`${f.rel}:${i + 1} 命中专利标识 ${p.id}（${p.desc}）→ ${line.trim().slice(0, 120)}`);
       }
     });
-    // P-word. 专利相关字样（P0-2 · P 面只增不减，无豁免）：随包文件禁含任何专利字样
+    // P-word. 专利相关字样（P0-2 · P 面只增不减，无豁免）：随包文件禁含任何专利字样。
+    // R1：单独记账（Pword）——冻结期 --expect-blocked 亦不放行（区别于 P-sec/P-app/P-pub 的豁免语义）
     lines.forEach((line, i) => {
-      if (PATENT_WORD_RE.test(line)) violations.P.push(`${f.rel}:${i + 1} 命中专利字样 P-word（${PATENT_WORD_DESC}）→ ${line.trim().slice(0, 120)}`);
+      if (PATENT_WORD_RE.test(line)) violations.Pword.push(`${f.rel}:${i + 1} 命中专利字样 P-word（${PATENT_WORD_DESC}）→ ${line.trim().slice(0, 120)}`);
     });
   }
 
@@ -253,6 +260,7 @@ function auditExtracted(extractRoot, label) {
     ...violations.c.map((m) => `[c] ${m}`),
     ...violations.F.map((m) => `[F] ${m}`),
     ...violations.P.map((m) => `[P] ${m}`),
+    ...violations.Pword.map((m) => `[P] ${m}`),
     ...scanFailures.map((m) => `[c] ${m}`),
   ];
 
@@ -270,7 +278,7 @@ function auditExtracted(extractRoot, label) {
   if (failures.length) {
     // R2.1 对账口径：分类计数直接取自明细数组长度（禁止人工归纳），与下方逐条明细严格互验
     // （scanFailures 在明细中同为 [c] 前缀，故并入 c 计数）
-    console.log(`  审计结论: FAIL（${failures.length} 项违规：[a]×${violations.a.length} [b]×${violations.b.length} [c]×${violations.c.length + scanFailures.length} [F]×${violations.F.length} [P]×${violations.P.length}）`);
+    console.log(`  审计结论: FAIL（${failures.length} 项违规：[a]×${violations.a.length} [b]×${violations.b.length} [c]×${violations.c.length + scanFailures.length} [F]×${violations.F.length} [P]×${violations.P.length + violations.Pword.length}）`);
     for (const m of failures) console.log(`    ${m}`);
   } else {
     console.log('  审计结论: PASS（a packages 白名单制 · b 零豁免路径 · c 核心符号 · F 内核指纹 · P 专利标识 · d 清单已输出）');
@@ -281,10 +289,14 @@ function auditExtracted(extractRoot, label) {
   };
 }
 
-// P0-2（P0-D 中4）：红牌必须**仅**由内核守卫类（F/P/c）所致——[a]/[b] 违规不得被
-// --expect-blocked 的冻结期口径掩盖（对准原 :261/:411-413 掩盖面）
+// P0-2（P0-D 中4）：红牌必须**仅**由内核守卫类（F/c）所致——[a]/[b] 违规不得被
+// --expect-blocked 的冻结期口径掩盖（对准原 :261/:411-413 掩盖面）。
+// R1 返工（低修2）：冻结期放行条件 = a+b===0 ∧ F/c>0 ∧ 无 P-word 命中——
+// P-word 由调用处单独硬断言（冻结期亦不放行）；P-sec/P-app/P-pub 维持原豁免语义
+// （可致红牌、不阻断 --expect-blocked，也不计为放行所需的内核守卫红）。
 const redByKernelGuardOnly = (r) =>
-  r.blockedByKernelGuard && (r.violations.a.length + r.violations.b.length) === 0;
+  (r.violations.F.length > 0 || r.violations.c.length > 0)
+  && (r.violations.a.length + r.violations.b.length) === 0;
 
 /* ── 真实产物审计：npm pack → 解包 → 审计 ───────────────────────── */
 
@@ -442,8 +454,9 @@ try {
     const evidenceMarked = verifyEvidenceMarked(tmp);
     console.log('▶ [selftest 4/4] 真实产物判定（冻结期=红牌为正确；解冻期=绿牌为正确）…');
     const real = auditRealPack(tmp);
-    // 判定一致性：FAIL 必须仅由内核守卫类命中（F/P/c）所致（[a]/[b] 违规不被冻结期口径掩盖）；绿牌必须零违规
-    const verdictOk = real.pass ? true : redByKernelGuardOnly(real);
+    // 判定一致性：FAIL 必须仅由内核守卫类命中（F/c）所致（[a]/[b] 违规不被冻结期口径掩盖）；
+    // P-word 命中对真实产物同样零容忍（R1 低修2：冻结期亦不放行）；绿牌必须零违规
+    const verdictOk = real.pass ? true : redByKernelGuardOnly(real) && real.violations.Pword.length === 0;
     console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（仅内核守卫所致 = ${redByKernelGuardOnly(real) ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致或含 a/b 违规，须人工核查'}`);
     ok = baitCaught && evidenceClean && evidenceMarked && verdictOk;
   } else {
@@ -458,7 +471,11 @@ try {
     } else if (expectBlocked) {
       // P0-2（P0-D 中4）：--expect-blocked 只豁免「内核守卫所致的红牌」——
       // [a]（packages 域白名单外）/ [b]（零豁免路径）违规不得被冻结期口径掩盖，一并拦截
-      if (!redByKernelGuardOnly(real)) fail('红牌非（仅）内核指纹/专利标识/核心符号所致，或存在 [a]/[b] 违规——须人工核查失败明细（--expect-blocked 不掩盖 a/b 类违规）');
+      // R1 返工（低修2）：P-word 命中**冻结期亦不放行**（随包禁专利字样为核心政策）——硬断言先于其余判定
+      if (real.violations.Pword.length > 0) {
+        fail(`红牌含 P-word 专利字样命中 ×${real.violations.Pword.length}（见上方 [P] 明细）——随包内容禁专利字样为核心政策，冻结期亦不放行`);
+      }
+      if (!redByKernelGuardOnly(real)) fail('红牌非内核指纹/核心符号所致，或存在 [a]/[b]/[P]（P-sec/P-app/P-pub 形态）单发违规——须人工核查失败明细（--expect-blocked 不掩盖 a/b 类违规）');
       ok = true;
     } else {
       ok = false;
