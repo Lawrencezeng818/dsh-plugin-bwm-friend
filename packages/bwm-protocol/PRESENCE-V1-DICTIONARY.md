@@ -9,7 +9,7 @@ authority:
   protocol_role: derived   # schema/state.json 的 presence 枚举由本词典派生并校验
   sdk_role: derived        # bwm-sdk 的 Presence 域类型由本词典生成
   ui_role: derived         # Shell/皮肤 recipe 注册以本词典状态名为键
-  patent_role: derived     # 专利2(Presence State Generation)实施例的唯一术语引用源
+  ip_role: derived     # 专利2(Presence State Generation)实施例的唯一术语引用源（本文件不入包，仅同步 machine form 的键名中性化改名）
 versioning: additive-only(新增状态=minor;修改/删除/改优先级/改层结构=major)
 ```
 

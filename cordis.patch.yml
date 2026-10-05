@@ -11,5 +11,7 @@
     - id: bwm-friend-invariant
       name: 'dsh-plugin-bwm-friend/invariant'
       disabled: false
+    # 部署级组件（含本机专属默认域），不随 npm 包发布；
+    # 市场化需另走消毒 + 配置化增量。
     - id: bwm-friend-factgate
       name: 'dsh-plugin-bwm-friend/factgate'
