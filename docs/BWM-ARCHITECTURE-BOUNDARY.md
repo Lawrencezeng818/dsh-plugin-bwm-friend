@@ -31,7 +31,7 @@
 | Context Store（8 域上下文存储） | 记忆/人格数据 = 商业核心 | `grep createAgentContext shell/` 必须 0 |
 | Presence Decision（状态仲裁） | 状态机逻辑私有 | `grep PRESENCE_STATES shell/` 必须 0 |
 | Emotion Calculation（情绪权重） | Affective 决策私有 | `grep wireEmotion/emotion.` shell/ 必须 0 |
-| Ledger Persistence（行为记录持久化） | 生命周期数据 = 专利核心 | `grep wireLedger shell/` 必须 0 |
+| Ledger Persistence（行为记录持久化） | 生命周期数据 = 商业核心 | `grep wireLedger shell/` 必须 0 |
 | 任何"我是谁"人格常量 | Identity = 商业核心 | `grep PERSONA shell/` 必须 0 |
 
 ### Runtime（bwm-runtime-core）禁止拥有
@@ -55,7 +55,7 @@ Shell ↔ Runtime 只允许通过 **BWM Protocol**（见 docs/BWM-PROTOCOL-v1.md
 ## 4. 演进规则
 
 - 本文件变更 = 架构变更，需创世者批准（🔴 治理文件）
-- 边界放宽（Shell 允许某核心组件）必须带商业理由 + 专利评估
+- 边界放宽（Shell 允许某核心组件）必须带商业理由 + 法务评估
 - 每次 PR 审计：新增文件归属是否正确层；grep 红线 0 命中
 
 ## 5. 当前现状标注（2026-08-24，P0 冻结时刻）

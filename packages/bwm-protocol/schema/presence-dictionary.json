@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://laikaton.tech/schemas/bwm/presence-dictionary-v1.json",
   "title": "BWM Presence v1 Canonical Dictionary (machine form)",
-  "description": "Machine-readable derivation of PRESENCE-V1-DICTIONARY.md. Single source of truth for all presence enums (Protocol/SDK/UI/Patent). Authority: the dictionary document; this file is its derived machine form. CI rule: no consumer enum may add/remove/rename states outside this dictionary.",
+  "description": "Machine-readable derivation of PRESENCE-V1-DICTIONARY.md. Single source of truth for all presence enums (Protocol/SDK/UI/IP). Authority: the dictionary document; this file is its derived machine form. CI rule: no consumer enum may add/remove/rename states outside this dictionary.",
   "type": "object",
   "dictionary_version": "1.1.0-draft",
   "authority": {
@@ -10,7 +10,7 @@
     "protocol_role": "derived",
     "sdk_role": "derived",
     "ui_role": "derived",
-    "patent_role": "derived"
+    "ip_role": "derived"
   },
   "properties": {
     "semantic_states": {
@@ -45,7 +45,7 @@
       "const": ["transitioning", "unavailable"]
     },
     "migration_blocked_activities": {
-      "description": "迁移门控:这些活动态活跃时拒绝迁移请求(专利3 门控)",
+      "description": "迁移门控:这些活动态活跃时拒绝迁移请求(状态机门控)",
       "type": "array",
       "const": ["executing", "working"]
     },

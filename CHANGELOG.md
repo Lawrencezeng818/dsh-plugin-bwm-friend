@@ -32,11 +32,11 @@
 ### 嵌入式壳层（`src/client.js`）
 - 🐛 **悬浮按钮拖动假实现**：pointerup 把 right/bottom 重置回初始值（README Known Limitations 根因）——拖动落点即新位并 clamp 视口内
 - 🐛 **自动滚动误判**：候选滚动容器收敛到会话区（centerCol 内），排除侧栏会话树与 composer dock（TodoPanel 列表）——原会把侧栏/任务列表强制滚到底、且任一非底部容器误触发全局暂停跟随
-- 🐛 **账本/上下文写入竞态**：ledger append、context persist、mode persist 三条「GET→合并→PUT」链并发交错互丢字段（账本条目静默丢失，专利4 持久链完整性）——统一 `queueConfigWrite` 串行链
+- 🐛 **账本/上下文写入竞态**：ledger append、context persist、mode persist 三条「GET→合并→PUT」链并发交错互丢字段（账本条目静默丢失，关系账本持久链完整性）——统一 `queueConfigWrite` 串行链
 - 清理无效 CSS 声明 `child-shadow`（笔误）
 - 浏览器实测（3200 沙盒 + CDP）：模型菜单真实鼠标点击正常弹出、长模型名（DeepSeek-V4-Flash-Vision-Exp High）压力下 composer 无溢出无裁剪、发送键/边框完整、根路径 `/` 原生界面零侵扰——历史 P1（点模型名不弹菜单）/P4（发送键裁剪）确认由 0.7.x CSS 修复收口，本批次回归通过
 
-### 闭源核心包（专利实现证据）
+### 闭源核心包（实现证据）
 - 🐛 **P1 感知路由补偿失真**：`compensate(failed, 全量applied)` 对每个易失项重复同参调用——改逐项 `compensate(u, [v])`（测试曾只断言 length>0 恰好掩盖）
 - 🐛 **P1 会话销毁即失效破约**：closeSession 后 commit/route 照常 apply——入口补 SESSION_CLOSED 拒绝
 - 🐛 **P1 持久化准入旁路**：桥接函数不复核指令域与获准模式 + 账本 admit 无确认门——双门修复（`not_persist_granted` / `perception_not_user_confirmed`），「强行桥接」测试分支从永不可达改为真实断言
@@ -46,10 +46,10 @@
 ### 发布工程
 - README Known Limitations「悬浮按钮拖动未实现」关闭；版本 0.7.2（0.7.1 未单独定版一并发布）
 
-## 0.7.1 (2026-09-21) · factgate 事实门控 companion（专利→生产力：会话层执行门控）
+## 0.7.1 (2026-09-21) · factgate 事实门控 companion（知产→生产力：会话层执行门控）
 
 - **新增 `factgate.js` companion**（bundle patch 行 `bwm-friend-factgate`，真实上下文加载）：把事件内核"门控获准帧"（runtime-core index.js:87）装到 harness 会话层——`fact_probe`（权威源探测）/ `fact_assert`（断言核验门控：ADMITTED 发票据、BLOCKED 拦截+理由）/ `fact_ledger`（审计账本：单调序号、上限500滚动、每域 retained 票据）/ **全局写保护守卫**（`tools.guard` 普通上下文注册=全局生效、单调不可翻案：权威源文件对 write/edit 只读）
-- **事实域 v1 内置 4 域**：patent-status（SSOT）/ package-compliance（递交包 SHA256SUMS）/ env-config（DSH_HOME AGENTS.md）/ e-receipt（SSOT 第7行受理状态）；settings 化配置列 v2
+- **事实域 v1 内置 4 域**：知产状态域（SSOT）/ package-compliance（递交包 SHA256SUMS）/ env-config（DSH_HOME AGENTS.md）/ e-receipt（SSOT 第7行受理状态）；settings 化配置列 v2
 - **架构勘误记录**：动态会话插件沙箱门面剥掉 `tools.guard`（cordis-host-runner/guard.ts 只暴露 register/schemas/get，防绕过单调守卫）——写保护**只能部署级挂载**；会话内原型（fgate-2/pkg-5）按"显式失灵不静默"特性检测降级验证了同款限制
 - **fs/tools 可选服务纪律**：ctx.get + 特性检测，缺席显式降级报告，绝不静默放行（invariant 同款教训）；工具逐具 try/catch 注册，单具被拒不拖垮其余
 - 经验判例：`/Users/zengtian/projects/memory/workflow/20260921-DSH-动态插件开发四暗礁与契约先行节奏.md`（defineTool 工位/参数根开放/输出 schema 显式/运行期特性检测）
@@ -57,19 +57,19 @@
 - **发布链全绿（2026-09-22）**：core 131/131 · artifact PASS · host 38/38（沙盒 3200）· e2e ✓ · pack ALL PASS · fresh ALL PASS；settings 通道端到端实测 PUT→落盘→GET 三连过
 - **SG 8089 门户链路退役（创世者裁决）**：DNS 实测直指广州，SG 不在服务路径；容器摘除、路由标记 retired、备份 `SG:/opt/boss-portal-retired-backup-20260922.tar.gz`；架构 SSOT（BOSS_THREE_NODE_TOPOLOGY.md）与脚本头同步更新
 
-## 0.7.0 (2026-09-11) · Perception Router（专利5 实现证据 / 跨域路由与一致性编排）
+## 0.7.0 (2026-09-11) · Perception Router（闭源实现证据 / 跨域路由与一致性编排）
 
-- **新增 `createPerceptionRouter()`**（`packages/bwm-runtime-core/src/perception-router.js`，纯逻辑无 I/O）：感知事件的**跨状态域路由与一致性编排**——专利5 交底书 v0.3 §四 六步骨架的可运行实现
+- **新增 `createPerceptionRouter()`**（`packages/bwm-runtime-core/src/perception-router.js`，纯逻辑无 I/O）：感知事件的**跨状态域路由与一致性编排**——内部技术方案 v0.3 §四 六步骨架的可运行实现
   - **感知会话**：`openSession()` 绑定允许采集的感知类别、调度策略、允许流向的域、新鲜度窗口与销毁条件；`closeSession()` 销毁（易失域随之失效）
   - **结构化感知事件**：`ingest()` 产出带事件标识/来源类型/生成时间/有效期/关系范围的事件（来源白名单与前台隐私门控在此拒绝）
   - **域更新决策向量**：`decide()` 输出每域 `deny | volatile | persist | defer`；**持久性默认值不对称**——易失运行状态域默认易失，持久历史状态域默认拒绝（持久化需同时满足显著性阈值+会话允许+关系范围匹配+显式分享或用户确认）
   - **域更新指令**：`route()` 产出**同一 eventId 串联**的候选指令，绑定主体、关系范围与策略版本（可追溯、可撤销）
   - **跨域一致性控制**：`commit()` 处理顺序（易失先于持久）、**策略版本冲突整体拒绝**、**部分失败补偿**（持久域失败→补偿已执行易失更新+标记待重试）、**迟到事件隔离**（轮次已完成的事件延迟至下一轮，绝不回写已完成轮）
-  - **域名下沉纪律**：目标状态域以「类」（易失/持久）表达，具体域名走配置——新增 `emotion/memory/task` 域无需改动路由器（专利5 权项演化空间的代码对应）
-- **边界**：不生成存在状态（专利2 的权）、不计算关系增量与写账本（专利4 的权）——只产出候选指令，交事件内核与账本端执行（交底书 §二 裁决表）
-- **测试**：core 套件 36→**48 全绿**（新增 12 项跨域一致性契约测试：会话销毁/隐私拒绝路径/置信度与显著性门控/持久化准入/迟到事件隔离/过期事件/部分失败补偿/版本冲突/同事件标识串联/域扩展性/审计视图）——即专利5 §八 要求的**核心创造性证据**（一致性编排，而非采样 Benchmark）
+  - **域名下沉纪律**：目标状态域以「类」（易失/持久）表达，具体域名走配置——新增 `emotion/memory/task` 域无需改动路由器（权项演化空间的代码对应）
+- **边界**：不生成存在状态（存在状态生成机制之权）、不计算关系增量与写账本（关系账本机制之权）——只产出候选指令，交事件内核与账本端执行（技术方案 §二 裁决表）
+- **测试**：core 套件 36→**48 全绿**（新增 12 项跨域一致性契约测试：会话销毁/隐私拒绝路径/置信度与显著性门控/持久化准入/迟到事件隔离/过期事件/部分失败补偿/版本冲突/同事件标识串联/域扩展性/审计视图）——即技术方案 §八 要求的**核心创造性证据**（一致性编排，而非采样 Benchmark）
 
-## 0.6.0 (2026-09-10) · wireLedger 落盘（B2 反超第一步 / 专利4 实施例）
+## 0.6.0 (2026-09-10) · wireLedger 落盘（B2 反超第一步 / 关系账本实施例）
 
 ### 发布收敛（2026-09-11 · 可发布门禁全绿）
 
@@ -82,7 +82,7 @@
 - 门禁：**core 36 · host 38 · e2e 12 · T1-T14 17 项 · pack 冒烟 8 · fresh DSH 装载 15 —— 全绿**
 
 - **Ledger 持久化**：`wireLedger(bus, context, opts)` / `createRuntime(opts)` 新增可选 `ledger` store 适配器（`append(entry)` + `load()`）——逐事件写透、启动异步恢复、合并守 200 上限；append 失败 emit `ledger:persist.error` 不阻断事件管线；不传 ledger 时行为与 0.5 完全一致（向后兼容）
-- **语义字段透传**：task/tool 事件 payload 整体进账本（`relationship_delta`/`emotion_context` 等未来语义字段原样保留，专利4 前向兼容）；core 保持纯逻辑无 I/O，store 由 Shell 提供
+- **语义字段透传**：task/tool 事件 payload 整体进账本（`relationship_delta`/`emotion_context` 等未来语义字段原样保留，关系账本前向兼容）；core 保持纯逻辑无 I/O，store 由 Shell 提供
 - **Shell 接线**：`createLedgerStore()`（src/client.js）——内存镜像 + 单飞行写穿 settings 通道（宿主落盘，memory.json 同目录），镜像上限 500；未来平移宿主 JSONL/SQL（P6 agent_actions）只换 store 实现
 - **边界不变**：`DOMAIN_POLICY.timeline` 仍为 `'runtime'`（persistSnapshot 快照不含 timeline）——账本走独立通道，不混快照
 - **测试**：core 套件 32→36 全绿（落盘/恢复链、透传+合并上限、失败不阻断、向后兼容）；host 端点套件 36 失败为 HEAD 既有（需活 DSH 宿主），与本次改动无关（基线 diff 为空）

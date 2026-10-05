@@ -15,6 +15,16 @@
  *   - b 项增补 mira-agent 目录段禁入。
  *   - --expect-blocked：冻结期常态模式（真实产物含未公开内核 → 红牌为预期，exit 0）。
  *
+ * P0-2 整改批（2026-10-06 · 整改单 v3.2）：
+ *   - [P] 面只增不减：新增 P-word 专利字样词表检查（随包文件禁含任何专利字样，
+ *     词表单一来源 scripts/patent-wordlist.mjs，与 P0-A 消毒走查共用，大小写不敏感）。
+ *     原 P-sec/P-app/P-pub 形态面原样保留；b/F/c 面不动。
+ *   - --expect-blocked 修复（P0-D 中4）：要求 violations.a+b === 0 才允许 exit 0
+ *     （红牌必须是内核守卫所致，[a]/[b] 违规不得被冻结期口径掩盖）。
+ *   - 0.6.0 对照双断言：保留 verifyEvidenceNotMisfired 特异性语义（不动），
+ *     另加 verifyEvidenceMarked——0.6.0 全量判定 = 红 且红由 a/b 类所致。
+ *   - 内部 npm pack 加 --ignore-scripts（配合 package.json prepack 钩子，防递归）。
+ *
  * 用法:
  *   node scripts/audit-release.mjs                  # 审计真实产物；FAIL → exit 1（发布阻断）
  *   node scripts/audit-release.mjs --expect-blocked # 冻结期：预期红牌 → exit 0；转绿 → exit 1 提示核查
@@ -26,10 +36,12 @@
  *   b. 零豁免路径：bwm-runtime-core 目录段、mira-agent 目录段、persona.yaml、文件名含 "-persona"。
  *   c. 专利核心符号词边界 grep（含人格常量），豁免清单逐条显式打印。
  *   F. 内核指纹：随包文本文件命中 v0.7.2+ 新内核机制代码指纹即 FAIL，无豁免。
- *   P. 专利标识：段落号 [dddd] / 申请号 / CN 公布号形态禁入，无豁免。
+ *   P. 专利标识：段落号 [dddd] / 申请号 / CN 公布号形态禁入，无豁免；
+ *      P-word 专利字样（P0-2 起）：随包文件禁含任何专利字样（词表共用，无豁免）。
  *   d. 输出包内文件清单与总大小摘要，供人工复核。
  */
 import { execFileSync } from 'node:child_process';
+import { PATENT_WORD_RE, PATENT_WORD_DESC } from './patent-wordlist.mjs';
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, extname, basename, sep } from 'node:path';
@@ -115,6 +127,9 @@ const CORE_FINGERPRINTS = [
 ];
 
 // P 项：专利标识形态（R2 新增，无豁免）。预扫确认壳代码/docs/static-ui/0.6.0 旧版零命中。
+// ⚠️ 本清单是「形态面」，供 selftest 特异性验证（scanGuardOnly）复用；
+// P0-2 新增的「字样面」（P-word，随包文件禁含任何专利字样）只在 auditExtracted 生效，
+// 不进 scanGuardOnly——0.6.0 存证含专利字样（本就是泄漏事故样本），进特异性验证会误报。
 const PATENT_ID_PATTERNS = [
   { id: 'P-sec', re: /\[\d{4}\]/, desc: '专利说明书段落号注释形态（如 [0041]）' },
   { id: 'P-app', re: /\b202[0-9]{9}(?:\.[0-9])?\b/, desc: '专利申请号形态（2026 开头 13 位，可带校验位）' },
@@ -222,6 +237,10 @@ function auditExtracted(extractRoot, label) {
         if (p.re.test(line)) violations.P.push(`${f.rel}:${i + 1} 命中专利标识 ${p.id}（${p.desc}）→ ${line.trim().slice(0, 120)}`);
       }
     });
+    // P-word. 专利相关字样（P0-2 · P 面只增不减，无豁免）：随包文件禁含任何专利字样
+    lines.forEach((line, i) => {
+      if (PATENT_WORD_RE.test(line)) violations.P.push(`${f.rel}:${i + 1} 命中专利字样 P-word（${PATENT_WORD_DESC}）→ ${line.trim().slice(0, 120)}`);
+    });
   }
 
   /* d. 清单与总大小摘要 */
@@ -262,13 +281,19 @@ function auditExtracted(extractRoot, label) {
   };
 }
 
+// P0-2（P0-D 中4）：红牌必须**仅**由内核守卫类（F/P/c）所致——[a]/[b] 违规不得被
+// --expect-blocked 的冻结期口径掩盖（对准原 :261/:411-413 掩盖面）
+const redByKernelGuardOnly = (r) =>
+  r.blockedByKernelGuard && (r.violations.a.length + r.violations.b.length) === 0;
+
 /* ── 真实产物审计：npm pack → 解包 → 审计 ───────────────────────── */
 
 function auditRealPack(tmp) {
-  console.log('▶ npm pack（临时目录收包，不污染仓库）…');
+  console.log('▶ npm pack（临时目录收包，不污染仓库；--ignore-scripts 防 prepack 递归）…');
   let packed;
   try {
-    packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', tmp], { cwd: REPO_ROOT }));
+    // P0-2：--ignore-scripts 必须先于 package.json 的 prepack 钩子存在（顺序不可颠倒，防无限递归）
+    packed = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tmp], { cwd: REPO_ROOT }));
   } catch (e) { throw new Error(`npm pack 失败: ${e.message}`); }
   const tgz = join(tmp, packed[0].filename);
   if (!statSync(tgz, { throwIfNoEntry: false })) throw new Error(`tarball 未生成: ${tgz}`);
@@ -304,7 +329,7 @@ function scanGuardOnly(files) {
 /* ── selftest：毒饵必须被拦 + 0.6.0 存证不误伤 + 真实产物判定 ───── */
 
 function buildAndAuditPoison(tmp) {
-  console.log('▶ [selftest 1/3] 毒饵假包（旧形态 + 内联新内核 client 形态，期望 FAIL）…');
+  console.log('▶ [selftest 1/4] 毒饵假包（旧形态 + 内联新内核 client 形态，期望 FAIL）…');
   const poisonRoot = join(tmp, 'poison');
   const pkg = join(poisonRoot, 'package');
   run('mkdir', ['-p', join(pkg, 'packages/bwm-runtime-core/src'), join(pkg, 'packages/mira-agent'), join(pkg, 'lib'), join(pkg, 'docs')]);
@@ -362,7 +387,7 @@ function buildAndAuditPoison(tmp) {
 }
 
 function verifyEvidenceNotMisfired(tmp) {
-  console.log('▶ [selftest 2/3] 0.6.0 存证旧产物不误伤验证（指纹/专利号守卫零命中）…');
+  console.log('▶ [selftest 2/4] 0.6.0 存证旧产物不误伤验证（指纹/专利号守卫零命中）…');
   if (!existsSync(EVIDENCE_TGZ)) {
     console.log(`  ⚠️ SKIP：存证不存在（${EVIDENCE_TGZ}）——不误伤结论以本次整改验证报告为准`);
     return true;
@@ -383,6 +408,27 @@ function verifyEvidenceNotMisfired(tmp) {
   return clean;
 }
 
+/* ── 0.6.0 全量判定断言（P0-2 · 整改单 v3.2 验收③另一面）──────────────
+ * 与上面的特异性断言**两条并存、各管一面**：特异性断言管 F/P 形态面鉴别力（不动），
+ * 本断言管「历史泄漏样本就该被标记」——0.6.0 存证全量 a/b/c/F/P 审计必须红牌，
+ * 且红必须由 a/b 类（packages 域白名单 / 零豁免路径）所致。
+ * ❌ 不采用「0.6.0 必红」的字面改法（会与 F/P 形态面零命中冲突）。 */
+function verifyEvidenceMarked(tmp) {
+  console.log('▶ [selftest 3/4] 0.6.0 存证全量判定（期望红牌 且 由 a/b 类所致）…');
+  if (!existsSync(EVIDENCE_TGZ)) {
+    console.log(`  ⚠️ SKIP：存证不存在（${EVIDENCE_TGZ}）——全量判定结论以本次整改验证报告为准`);
+    return true;
+  }
+  const ev = join(tmp, 'evidence-060-full');
+  run('mkdir', ['-p', ev]);
+  run('tar', ['-xzf', EVIDENCE_TGZ, '-C', ev]);
+  const r = auditExtracted(ev, '0.6.0 存证全量审计（历史泄漏样本，期望 FAIL）');
+  const ab = r.violations.a.length + r.violations.b.length;
+  const marked = r.pass === false && ab > 0;
+  console.log(`  0.6.0 全量判定: ${r.pass ? '绿牌' : '红牌'} · [a]+[b]=${ab}（a=${r.violations.a.length} b=${r.violations.b.length}）→ ${marked ? '✅ 历史泄漏样本被正确标记（红且由 a/b 所致）' : '❌ 0.6.0 未被 a/b 类标记——packages 白名单/路径守卫失效'}`);
+  return marked;
+}
+
 /* ── 入口 ───────────────────────────────────────────────────────── */
 
 const selftest = process.argv.includes('--selftest');
@@ -393,12 +439,13 @@ try {
   if (selftest) {
     const baitCaught = buildAndAuditPoison(tmp);
     const evidenceClean = verifyEvidenceNotMisfired(tmp);
-    console.log('▶ [selftest 3/3] 真实产物判定（冻结期=红牌为正确；解冻期=绿牌为正确）…');
+    const evidenceMarked = verifyEvidenceMarked(tmp);
+    console.log('▶ [selftest 4/4] 真实产物判定（冻结期=红牌为正确；解冻期=绿牌为正确）…');
     const real = auditRealPack(tmp);
-    // 判定一致性：FAIL 必须由内核守卫类命中（F/P/c）所致；绿牌必须零违规
-    const verdictOk = real.pass ? true : real.blockedByKernelGuard;
-    console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（内核守卫触发 = ${real.blockedByKernelGuard ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致，须人工核查'}`);
-    ok = baitCaught && evidenceClean && verdictOk;
+    // 判定一致性：FAIL 必须仅由内核守卫类命中（F/P/c）所致（[a]/[b] 违规不被冻结期口径掩盖）；绿牌必须零违规
+    const verdictOk = real.pass ? true : redByKernelGuardOnly(real);
+    console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（仅内核守卫所致 = ${redByKernelGuardOnly(real) ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致或含 a/b 违规，须人工核查'}`);
+    ok = baitCaught && evidenceClean && evidenceMarked && verdictOk;
   } else {
     const real = auditRealPack(tmp);
     if (real.pass) {
@@ -409,7 +456,9 @@ try {
         ok = true;
       }
     } else if (expectBlocked) {
-      if (!real.blockedByKernelGuard) fail('红牌非内核指纹/专利标识/核心符号所致，须人工核查失败明细');
+      // P0-2（P0-D 中4）：--expect-blocked 只豁免「内核守卫所致的红牌」——
+      // [a]（packages 域白名单外）/ [b]（零豁免路径）违规不得被冻结期口径掩盖，一并拦截
+      if (!redByKernelGuardOnly(real)) fail('红牌非（仅）内核指纹/专利标识/核心符号所致，或存在 [a]/[b] 违规——须人工核查失败明细（--expect-blocked 不掩盖 a/b 类违规）');
       ok = true;
     } else {
       ok = false;
