@@ -32,6 +32,8 @@ console.log('tarball:', packed[0].filename, packed[0].size + 'B');
 const fileList = (packed[0].files || []).map((f) => f.path);
 ok('tarball 含 packages/bwm-protocol（协议随包，行为确定性）', fileList.some((p) => p.includes('packages/bwm-protocol/schema/persona.js')));
 ok('tarball 含 static-ui 壳（BWM_STATIC 默认值自包含）', fileList.includes('static-ui/index.html'));
+// 防回潮：部署级组件（factgate）不随包发布，出现即 FAIL
+ok('tarball 不含 factgate.js（部署级组件不入包）', !fileList.some((p) => p.endsWith('factgate.js')));
 
 // 2. 干净目录安装（依赖从 registry 拉；安装不了的依赖在这里爆）
 execSync(`npm i --no-audit --no-fund --loglevel=error "${tgz}"`, { cwd: tmp, stdio: 'pipe' });
