@@ -23,8 +23,9 @@ process.env.HOME = tmp; // os.homedir() 跟随 HOME → 配置/资产默认值�
 let failed = 0;
 const ok = (name, cond) => { console.log((cond ? 'PASS ' : 'FAIL ') + name); if (!cond) failed = 1; };
 
-// 1. 打包（严格按 files 白名单）
-const packed = JSON.parse(execSync('npm pack --json', { cwd: repo, encoding: 'utf8' }));
+// 1. 打包（严格按 files 白名单；--ignore-scripts：prepack 审计输出会混入 stdout 破坏 --json 解析，
+//    门禁本身由 audit:release / prepack / prepublishOnly 独立把守，此处验证的是产物可装性）
+const packed = JSON.parse(execSync('npm pack --ignore-scripts --json', { cwd: repo, encoding: 'utf8' }));
 const tgz = join(repo, packed[0].filename);
 console.log('tarball:', packed[0].filename, packed[0].size + 'B');
 // 自包含断言：协议副本与 UI 壳必须随包（异机不靠 registry/个人路径）
