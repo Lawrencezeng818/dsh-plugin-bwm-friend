@@ -27,8 +27,9 @@
  *
  * R1 返工（2026-10-06 · 返工单低修2）：
  *   - --expect-blocked 冻结期放行条件收紧：a+b===0 ∧ F/c>0 ∧ **无 P-word 命中**
- *     （P-word＝随包禁专利字样核心政策，冻结期亦不放行；P-sec/P-app/P-pub 维持原豁免语义，
- *     即冻结期红牌可由其所致但不计为放行所需的内核守卫红）。解冻切换条款见
+ *     （P-word＝随包禁专利字样核心政策，命中即 exit 1，冻结期亦不放行；P-sec/P-app/P-pub
+ *     单发红牌同样阻断——R1 后不再被豁免，须有 F/c 内核守卫红方可放行；冻结期真实包
+ *     P=0，无功能影响）。解冻切换条款见
  *     docs/发布政策_随包内容禁专利字样_v1.0.md 第四节（解冻动作清单首项 = prepack 切回严格口径）。
  *
  * 用法:
@@ -244,7 +245,7 @@ function auditExtracted(extractRoot, label) {
       }
     });
     // P-word. 专利相关字样（P0-2 · P 面只增不减，无豁免）：随包文件禁含任何专利字样。
-    // R1：单独记账（Pword）——冻结期 --expect-blocked 亦不放行（区别于 P-sec/P-app/P-pub 的豁免语义）
+    // R1：单独记账（Pword）——冻结期 --expect-blocked 命中即 exit 1，亦不放行（P-sec/P-app/P-pub 单发红牌同样阻断）
     lines.forEach((line, i) => {
       if (PATENT_WORD_RE.test(line)) violations.Pword.push(`${f.rel}:${i + 1} 命中专利字样 P-word（${PATENT_WORD_DESC}）→ ${line.trim().slice(0, 120)}`);
     });
@@ -292,8 +293,8 @@ function auditExtracted(extractRoot, label) {
 // P0-2（P0-D 中4）：红牌必须**仅**由内核守卫类（F/c）所致——[a]/[b] 违规不得被
 // --expect-blocked 的冻结期口径掩盖（对准原 :261/:411-413 掩盖面）。
 // R1 返工（低修2）：冻结期放行条件 = a+b===0 ∧ F/c>0 ∧ 无 P-word 命中——
-// P-word 由调用处单独硬断言（冻结期亦不放行）；P-sec/P-app/P-pub 维持原豁免语义
-// （可致红牌、不阻断 --expect-blocked，也不计为放行所需的内核守卫红）。
+// P-word 由调用处单独硬断言（冻结期亦不放行）；P-sec/P-app/P-pub 单发红牌同样阻断
+// （不计为放行所需的内核守卫红——须有 F/c 红牌方可放行；冻结期真实包 P=0，无功能影响）。
 const redByKernelGuardOnly = (r) =>
   (r.violations.F.length > 0 || r.violations.c.length > 0)
   && (r.violations.a.length + r.violations.b.length) === 0;
