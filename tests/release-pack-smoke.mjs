@@ -36,18 +36,22 @@ ok('tarball 含 static-ui 壳（BWM_STATIC 默认值自包含）', fileList.incl
 ok('tarball 不含 factgate.js（部署级组件不入包）', !fileList.some((p) => p.endsWith('factgate.js')));
 
 // 5. 钩子回归断言（P0-2 增量2 · 派单⑤）：prepack/prepublishOnly 必须存在且指向 audit——
-//    防钩子被摘（本断言直接读 package.json，不经 --ignore-scripts 旁路）
+//    防钩子被摘或以 `||`（如 `|| true`）吞掉门禁退出码（本断言直接读 package.json，
+//    不经 --ignore-scripts 旁路）
 const pkgJson = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
 ok(
-  'scripts.prepack 存在且含 audit-release --expect-blocked（含 classify 前置）',
+  'scripts.prepack 存在且含 audit-release --expect-blocked（含 classify 前置，无 || 旁路）',
   typeof pkgJson.scripts?.prepack === 'string'
     && pkgJson.scripts.prepack.includes('audit-release.mjs')
     && pkgJson.scripts.prepack.includes('--expect-blocked')
-    && pkgJson.scripts.prepack.includes('classify-docs-release.mjs'),
+    && pkgJson.scripts.prepack.includes('classify-docs-release.mjs')
+    && !pkgJson.scripts.prepack.includes('||'),
 );
 ok(
-  'scripts.prepublishOnly 存在且指向 audit:release',
-  typeof pkgJson.scripts?.prepublishOnly === 'string' && pkgJson.scripts.prepublishOnly.includes('audit:release'),
+  'scripts.prepublishOnly 存在且指向 audit:release（无 || 旁路）',
+  typeof pkgJson.scripts?.prepublishOnly === 'string'
+    && pkgJson.scripts.prepublishOnly.includes('audit:release')
+    && !pkgJson.scripts.prepublishOnly.includes('||'),
 );
 
 // 6. 随包面与声明一致（P0-2 增量2 · 派单④ 路径B）：随包 cordis.patch.yml 的活跃 insert

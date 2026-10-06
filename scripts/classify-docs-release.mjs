@@ -74,11 +74,12 @@ const mismatches = [
   ...rows.filter((r) => !r.exclude && !covered(r.rel)).map((r) => `- ❌ 判入包但 files 未覆盖：${r.rel}`),
 ];
 
-const today = new Date().toLocaleDateString('sv-SE'); // 本地日期 YYYY-MM-DD
+// 幂等约束：清单内容只由仓库文件决定，禁含本地日期等动态值——
+// 否则跨日重跑（含 prepack）必脏工作树
 const manifest = [
   `# docs 出包分类清单（机器生成 · 勿手改）`,
   ``,
-  `> 生成命令：\`node scripts/classify-docs-release.mjs\`（生成日期 ${today}）`,
+  `> 生成命令：\`node scripts/classify-docs-release.mjs\``,
   `> 判据见 scripts/classify-docs-release.mjs 件首；词表单一来源 scripts/patent-wordlist.mjs。`,
   `> 出包机制：files 显式入包枚举（docs/ 不做目录级白名单）。`,
   `> 本清单位于 scripts/（不在 files 白名单）→ 不入包。`,

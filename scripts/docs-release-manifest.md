@@ -1,6 +1,6 @@
 # docs 出包分类清单（机器生成 · 勿手改）
 
-> 生成命令：`node scripts/classify-docs-release.mjs`（生成日期 2026-10-06）
+> 生成命令：`node scripts/classify-docs-release.mjs`
 > 判据见 scripts/classify-docs-release.mjs 件首；词表单一来源 scripts/patent-wordlist.mjs。
 > 出包机制：files 显式入包枚举（docs/ 不做目录级白名单）。
 > 本清单位于 scripts/（不在 files 白名单）→ 不入包。
