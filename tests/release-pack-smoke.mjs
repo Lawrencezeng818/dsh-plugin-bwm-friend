@@ -10,7 +10,7 @@
  * 用法: node tests/release-pack-smoke.mjs
  */
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -34,6 +34,50 @@ ok('tarball 含 packages/bwm-protocol（协议随包，行为确定性）', file
 ok('tarball 含 static-ui 壳（BWM_STATIC 默认值自包含）', fileList.includes('static-ui/index.html'));
 // 防回潮：部署级组件（factgate）不随包发布，出现即 FAIL
 ok('tarball 不含 factgate.js（部署级组件不入包）', !fileList.some((p) => p.endsWith('factgate.js')));
+
+// 5. 钩子回归断言（P0-2 增量2 · 派单⑤）：prepack/prepublishOnly 必须存在且指向 audit——
+//    防钩子被摘（本断言直接读 package.json，不经 --ignore-scripts 旁路）
+const pkgJson = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+ok(
+  'scripts.prepack 存在且含 audit-release --expect-blocked（含 classify 前置）',
+  typeof pkgJson.scripts?.prepack === 'string'
+    && pkgJson.scripts.prepack.includes('audit-release.mjs')
+    && pkgJson.scripts.prepack.includes('--expect-blocked')
+    && pkgJson.scripts.prepack.includes('classify-docs-release.mjs'),
+);
+ok(
+  'scripts.prepublishOnly 存在且指向 audit:release',
+  typeof pkgJson.scripts?.prepublishOnly === 'string' && pkgJson.scripts.prepublishOnly.includes('audit:release'),
+);
+
+// 6. 随包面与声明一致（P0-2 增量2 · 派单④ 路径B）：随包 cordis.patch.yml 的活跃 insert
+//    条目，其 name 必须经 exports 解析到**随包文件**——随包面不得含指向包外文件的活引用
+const patchYml = readFileSync(join(repo, 'cordis.patch.yml'), 'utf8');
+const insertRows = [];
+let curRow = null;
+for (const line of patchYml.split('\n')) {
+  const idm = line.match(/^\s*- id: (\S+)\s*$/);
+  if (idm) { if (curRow) insertRows.push(curRow); curRow = { id: idm[1] }; continue; }
+  if (!curRow) continue;
+  const nm = line.match(/^\s+name: '?([^'\s]+)'?\s*$/);
+  if (nm && curRow.name === undefined) { curRow.name = nm[1]; continue; }
+  const dm = line.match(/^\s+disabled: (true|false)\s*$/);
+  if (dm && curRow.disabled === undefined) curRow.disabled = dm[1] === 'true';
+}
+if (curRow) insertRows.push(curRow);
+const pkgName = pkgJson.name;
+for (const row of insertRows) {
+  if (row.disabled === true || row.name === undefined) continue; // 停用条目不加载，无活引用
+  const sub = row.name === pkgName ? '.' : row.name.startsWith(pkgName + '/') ? './' + row.name.slice(pkgName.length + 1) : null;
+  const target = sub !== null ? pkgJson.exports[sub] : undefined;
+  ok(
+    `patch 活跃条目 ${row.id}（${row.name}）exports 目标随包`,
+    Boolean(target) && fileList.includes(String(target).replace(/^\.\//, '')),
+  );
+}
+// 部署级组件（factgate）必须显式 disabled——随包 patch 不得活跃引用不随包模块（P0-F 路径B）
+const factgateRow = insertRows.find((r) => r.id === 'bwm-friend-factgate');
+ok('patch 条目 bwm-friend-factgate 显式 disabled（部署级显式化）', factgateRow?.disabled === true);
 
 // 2. 干净目录安装（依赖从 registry 拉；安装不了的依赖在这里爆）
 execSync(`npm i --no-audit --no-fund --loglevel=error "${tgz}"`, { cwd: tmp, stdio: 'pipe' });
