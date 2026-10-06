@@ -21,6 +21,21 @@
  * `~/.dsh-bwm-friend/config.json` 的 `factgate.domains`（{ 域ID: {label, source} }，
  * 经主插件 settings PUT 白名单 + bwm-protocol schema 校验落盘），覆盖内置默认；
  * 读取失败/缺项回退内置默认（settings 化的常态路径，不告警；形状非法键丢弃）。
+ *
+ * 部署级显式化（2026-10-06 · P0-2 增量2 P0-F 路径B）：本文件不随 npm 包发布（不在
+ * files 白名单），随包 cordis.patch.yml 的本条目默认 `disabled: true`（随包面不得
+ * 活跃引用包外文件）。部署侧启用步骤——profile 用户层 patch（~/.dsh/<profile>/
+ * cordis.patch.yml）追加复启用条目（后层可覆盖先层 insert 行、逐属性覆盖——
+ * boot 期 patch 合并落在 @deepseek-ai/cordis-plugin-include 的 applyEntryPatches
+ * （deepseek-harness vendor/include/src/index.ts:58：overrides 逐属性赋值，
+ * insert 行即时入索引故后层可命中先层插入行）；entry 级逐属性更新同语义见
+ * vendor/loader/src/config/entry.ts:145-179 Entry.update）：
+ *   - id: bwm-friend-factgate
+ *     disabled: false
+ * 保留 package.json exports['./factgate'] 的依据：宿主 cordis loader 对 entry.name 走
+ * 裸说明符 import(name)（deepseek-harness vendor/loader/src/config/tree.ts:145-161），
+ * Node 解析受 exports 门控——删除该条目 = 部署侧 ERR_PACKAGE_PATH_NOT_EXPORTED 断链
+ * （2026-10-06 独立进程 A/B 实证）。
  */
 
 import { readFileSync } from 'node:fs';

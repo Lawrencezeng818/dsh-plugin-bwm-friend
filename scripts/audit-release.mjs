@@ -26,11 +26,15 @@
  *   - 内部 npm pack 加 --ignore-scripts（配合 package.json prepack 钩子，防递归）。
  *
  * R1 返工（2026-10-06 · 返工单低修2）：
- *   - --expect-blocked 冻结期放行条件收紧：a+b===0 ∧ F/c>0 ∧ **无 P-word 命中**
- *     （P-word＝随包禁专利字样核心政策，命中即 exit 1，冻结期亦不放行；P-sec/P-app/P-pub
- *     单发红牌同样阻断——R1 后不再被豁免，须有 F/c 内核守卫红方可放行；冻结期真实包
- *     P=0，无功能影响）。解冻切换条款见
- *     docs/发布政策_随包内容禁专利字样_v1.0.md 第四节（解冻动作清单首项 = prepack 切回严格口径）。
+ *   - --expect-blocked 冻结期放行条件收紧：a+b===0 ∧ F/c>0 ∧ **无 P-word 命中**。
+ *     解冻切换条款见 docs/发布政策_随包内容禁专利字样_v1.0.md 第四节。
+ *
+ * P0-2 增量2（2026-10-06 · 冻结期口径加固，派单①）：
+ *   - 放行条件最终口径：a+b===0 ∧ (F>0 ∨ c>0) ∧ **P===0 ∧ Pword===0**——
+ *     任何 P 类命中（P-sec/P-app/P-pub/P-word）冻结期一律不放行，与内核红（F/c）
+ *     共存同样阻断（R1 口径的"单发阻断"表述有歧义：P 与 F 共载曾仍 exit 0，2b-i
+ *     三视角独立复现，见 docs/专家团汇总_2026-10-06_2b-i机制演练_P0-2整改实现复核.md 发现 A）。
+ *     selftest 真实产物判定（verdictOk）同口径。
  *
  * 用法:
  *   node scripts/audit-release.mjs                  # 审计真实产物；FAIL → exit 1（发布阻断）
@@ -245,7 +249,7 @@ function auditExtracted(extractRoot, label) {
       }
     });
     // P-word. 专利相关字样（P0-2 · P 面只增不减，无豁免）：随包文件禁含任何专利字样。
-    // R1：单独记账（Pword）——冻结期 --expect-blocked 命中即 exit 1，亦不放行（P-sec/P-app/P-pub 单发红牌同样阻断）
+    // 增量2：单独记账（Pword）——冻结期 --expect-blocked 命中即 exit 1（P 类一律不放行）
     lines.forEach((line, i) => {
       if (PATENT_WORD_RE.test(line)) violations.Pword.push(`${f.rel}:${i + 1} 命中专利字样 P-word（${PATENT_WORD_DESC}）→ ${line.trim().slice(0, 120)}`);
     });
@@ -290,14 +294,15 @@ function auditExtracted(extractRoot, label) {
   };
 }
 
-// P0-2（P0-D 中4）：红牌必须**仅**由内核守卫类（F/c）所致——[a]/[b] 违规不得被
-// --expect-blocked 的冻结期口径掩盖（对准原 :261/:411-413 掩盖面）。
-// R1 返工（低修2）：冻结期放行条件 = a+b===0 ∧ F/c>0 ∧ 无 P-word 命中——
-// P-word 由调用处单独硬断言（冻结期亦不放行）；P-sec/P-app/P-pub 单发红牌同样阻断
-// （不计为放行所需的内核守卫红——须有 F/c 红牌方可放行；冻结期真实包 P=0，无功能影响）。
+// P0-2（P0-D 中4）＋增量2（派单①）：冻结期放行条件最终口径 =
+//   a+b===0 ∧ (F>0 ∨ c>0) ∧ P===0 ∧ Pword===0
+// ——红牌必须仅由内核守卫类（F/c）所致；[a]/[b] 违规不得被冻结期口径掩盖，
+// 任何 P 类命中（P-sec/P-app/P-pub/P-word）与内核红共存同样不放行（无单发/共存之分）。
 const redByKernelGuardOnly = (r) =>
   (r.violations.F.length > 0 || r.violations.c.length > 0)
-  && (r.violations.a.length + r.violations.b.length) === 0;
+  && (r.violations.a.length + r.violations.b.length) === 0
+  && r.violations.P.length === 0
+  && r.violations.Pword.length === 0;
 
 /* ── 真实产物审计：npm pack → 解包 → 审计 ───────────────────────── */
 
@@ -455,10 +460,10 @@ try {
     const evidenceMarked = verifyEvidenceMarked(tmp);
     console.log('▶ [selftest 4/4] 真实产物判定（冻结期=红牌为正确；解冻期=绿牌为正确）…');
     const real = auditRealPack(tmp);
-    // 判定一致性：FAIL 必须仅由内核守卫类命中（F/c）所致（[a]/[b] 违规不被冻结期口径掩盖）；
-    // P-word 命中对真实产物同样零容忍（R1 低修2：冻结期亦不放行）；绿牌必须零违规
-    const verdictOk = real.pass ? true : redByKernelGuardOnly(real) && real.violations.Pword.length === 0;
-    console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（仅内核守卫所致 = ${redByKernelGuardOnly(real) ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致或含 a/b 违规，须人工核查'}`);
+    // 判定一致性（增量2口径）：FAIL 必须仅由内核守卫类命中（F/c）所致——[a]/[b] 违规
+    // 与任何 P 类命中（P-sec/P-app/P-pub/P-word）不被冻结期口径掩盖；绿牌必须零违规
+    const verdictOk = real.pass ? true : redByKernelGuardOnly(real);
+    console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（仅内核守卫所致 = ${redByKernelGuardOnly(real) ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致，或含 a/b/P 类违规，须人工核查'}`);
     ok = baitCaught && evidenceClean && evidenceMarked && verdictOk;
   } else {
     const real = auditRealPack(tmp);
@@ -470,13 +475,16 @@ try {
         ok = true;
       }
     } else if (expectBlocked) {
-      // P0-2（P0-D 中4）：--expect-blocked 只豁免「内核守卫所致的红牌」——
-      // [a]（packages 域白名单外）/ [b]（零豁免路径）违规不得被冻结期口径掩盖，一并拦截
-      // R1 返工（低修2）：P-word 命中**冻结期亦不放行**（随包禁专利字样为核心政策）——硬断言先于其余判定
+      // P0-2（P0-D 中4）＋增量2（派单①）：--expect-blocked 只豁免「内核守卫所致的红牌」——
+      // [a]（packages 域白名单外）/ [b]（零豁免路径）违规不得被冻结期口径掩盖；
+      // 任何 P 类命中（P-word 字样 / P-sec/P-app/P-pub 形态）冻结期一律不放行（与 F/c 共存同样阻断）
       if (real.violations.Pword.length > 0) {
         fail(`红牌含 P-word 专利字样命中 ×${real.violations.Pword.length}（见上方 [P] 明细）——随包内容禁专利字样为核心政策，冻结期亦不放行`);
       }
-      if (!redByKernelGuardOnly(real)) fail('红牌非内核指纹/核心符号所致，或存在 [a]/[b]/[P]（P-sec/P-app/P-pub 形态）单发违规——须人工核查失败明细（--expect-blocked 不掩盖 a/b 类违规）');
+      if (real.violations.P.length > 0) {
+        fail(`红牌含 P-sec/P-app/P-pub 形态命中 ×${real.violations.P.length}（见上方 [P] 明细）——冻结期任何 P 类命中一律不放行`);
+      }
+      if (!redByKernelGuardOnly(real)) fail('红牌非内核指纹/核心符号所致，或存在 [a]/[b] 违规——须人工核查失败明细（--expect-blocked 不掩盖 a/b 类违规）');
       ok = true;
     } else {
       ok = false;

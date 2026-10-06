@@ -11,7 +11,10 @@
     - id: bwm-friend-invariant
       name: 'dsh-plugin-bwm-friend/invariant'
       disabled: false
-    # 部署级组件（含本机专属默认域），不随 npm 包发布；
-    # 市场化需另走消毒 + 配置化增量。
+    # 部署级组件（含本机专属默认域），不随 npm 包发布——随包默认停用，
+    # 不得活跃引用包外文件；部署侧经 profile 用户层 patch 显式复启用
+    # （启用步骤见仓库根 factgate.js 头注；exports['./factgate'] 保留，
+    # 供 link:/检出形态的部署解析）。
     - id: bwm-friend-factgate
       name: 'dsh-plugin-bwm-friend/factgate'
+      disabled: true

@@ -33,10 +33,10 @@
     "test:artifact": "node tests/build-artifact-parity.mjs",
     "test:host": "node --test tests/host-endpoints.test.cjs",
     "test:e2e": "node tests/e2e-smoke.cjs",
-    "test:pack": "node tests/release-pack-smoke.mjs",
+    "test:pack": "node scripts/classify-docs-release.mjs && node tests/release-pack-smoke.mjs",
     "test:fresh": "node tests/release-fresh-dsh.mjs",
     "audit:release": "node scripts/audit-release.mjs",
-    "prepack": "node scripts/audit-release.mjs --expect-blocked",
+    "prepack": "node scripts/classify-docs-release.mjs && node scripts/audit-release.mjs --expect-blocked",
     "prepublishOnly": "npm run audit:release",
     "test": "npm run test:core && npm run test:artifact && npm run test:host && npm run test:e2e"
   },
