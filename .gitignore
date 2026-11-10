@@ -17,3 +17,6 @@ dist/
 # Local dev paths
 .worktrees/
 *.tgz
+
+# 本地归档快照（改前原稿备份，含旧版 client.js.bak 源码副本；不属产品基线）
+archive/

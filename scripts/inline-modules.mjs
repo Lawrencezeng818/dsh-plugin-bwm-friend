@@ -17,8 +17,9 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const RUNTIME_SRC_DIR = resolve(ROOT, 'packages', 'bwm-runtime-core', 'src');
 
 export const INLINE_MODULES = [
-  { id: './perception-router.js', entry: resolve(RUNTIME_SRC_DIR, 'perception-router.js') },
-  // 2026-09-14：专利4 权1 六步机制链实现（关系账本）
-  { id: './relationship-ledger.js', entry: resolve(RUNTIME_SRC_DIR, 'relationship-ledger.js') },
+  // 2026-11-01 P1-lite：专利 4（关系账本）/ 专利 5（感知路由器）实现已迁出本仓公开包，
+  // 迁往 @laikaton/bwm-cognitive-core（私有 · 永不发布 · 永不内联）。
+  // 依据：取证报告_2026-11-01_P0 + R79 独立复核（B 维持 + --scope=patent）。
+  // 🔴 禁止在此重新加入上述两条：audit [F] F7/F8 守卫会拦，且构成专利自我公开（R2）。
   { id: '@laikaton/bwm-runtime-core', entry: resolve(RUNTIME_SRC_DIR, 'index.js') },
 ];

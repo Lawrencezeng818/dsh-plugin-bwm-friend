@@ -447,10 +447,72 @@ function verifyEvidenceMarked(tmp) {
   return marked;
 }
 
+/* ── 视图：--scope=patent（2026-11-01 R79 条件 1）────────────────────
+ * 只回答一个问题：含未公开实施例的实现，是否已离开公开产物。
+ * 不受本视图管辖（由 full 视图管，并非本视图忽略即"已解冻"）：
+ *   · F1–F6 runtime 机制指纹（EventBus / Presence，公开面）
+ *   · [c] 公开 runtime 符号
+ * 解冻 F1–F6 须另起独立裁决（R79 条件 5），不得借本视图放行。
+ */
+function patentScopeVerdict(r) {
+  const f78 = r.violations.F.filter((m) => /命中内核指纹 F[78]\b/.test(m));
+  const ab = r.violations.a.length + r.violations.b.length;
+  const rows = [
+    ['[F7] 感知路由器内联标记', f78.filter((m) => /\bF7\b/.test(m)).length],
+    ['[F8] 关系账本内联标记', f78.filter((m) => /\bF8\b/.test(m)).length],
+    ['[P-word] 受控字样', r.violations.Pword.length],
+    ['[P-sec/P-app/P-pub] 标识形态', r.violations.P.length],
+    ['[a]+[b] 打包边界（白名单/零豁免路径）', ab],
+  ];
+  console.log('\n▶ 视图：patent（只验「受控实现是否离包」，不管公开 runtime 面）');
+  for (const [k, v] of rows) console.log(`  ${v === 0 ? '✅' : '❌'} ${k}: ${v}`);
+  console.log(`  ── 本视图不覆盖（见 full 视图）：[c]×${r.violations.c.length} 公开 runtime 符号 · `
+    + `[F1–F6]×${r.violations.F.length - f78.length} runtime 机制指纹`);
+  const clean = rows.every(([, v]) => v === 0);
+  console.log(clean
+    ? '  ✅ 受控实现已离包（patent scope PASS）'
+    : '  ❌ 受控实现仍在产物内（patent scope FAIL）');
+  return clean;
+}
+
+/* ── 冻结期声明校验（2026-11-01 R79 条件 6）─────────────────────────
+ * --expect-blocked 不得永久常开：必须附 scripts/freeze-declaration.json，
+ * 含 until（有效期，到期即失效）/ basis（解冻依据）/ ref（裁决出处）。
+ * 缺失、解析失败、已过期、字段不全 —— 一律拒绝放行。
+ */
+const FREEZE_DECL_PATH = join(REPO_ROOT, 'scripts', 'freeze-declaration.json');
+
+function checkFreezeDeclaration() {
+  if (!existsSync(FREEZE_DECL_PATH)) {
+    fail(`--expect-blocked 缺乏有效期声明：未找到 ${FREEZE_DECL_PATH}\n`
+      + '     冻结期放行须附 until/basis/ref 三字段（R79 条件 6：不得永久常开）');
+  }
+  let d;
+  try { d = JSON.parse(readFileSync(FREEZE_DECL_PATH, 'utf8')); } catch (e) {
+    fail(`--expect-blocked 声明解析失败：${FREEZE_DECL_PATH} → ${e.message}`);
+  }
+  for (const k of ['until', 'basis', 'ref']) {
+    if (!d[k] || typeof d[k] !== 'string') fail(`--expect-blocked 声明缺字段 \`${k}\`（${FREEZE_DECL_PATH}）`);
+  }
+  const untilMs = Date.parse(`${d.until}T23:59:59+08:00`);
+  if (Number.isNaN(untilMs)) fail(`--expect-blocked 声明 until 非法日期：${d.until}（应 YYYY-MM-DD）`);
+  if (Date.now() > untilMs) {
+    fail(`--expect-blocked 声明已于 ${d.until} 到期（今日 ${new Date().toISOString().slice(0, 10)}）——`
+      + '须重新裁定并更新 freeze-declaration.json，不得沿用过期声明放行');
+  }
+  const daysLeft = Math.ceil((untilMs - Date.now()) / 86400000);
+  console.log(`  冻结期声明：有效至 ${d.until}（剩 ${daysLeft} 天）`);
+  console.log(`    依据：${d.basis}`);
+  console.log(`    出处：${d.ref}`);
+}
+
 /* ── 入口 ───────────────────────────────────────────────────────── */
 
 const selftest = process.argv.includes('--selftest');
 const expectBlocked = process.argv.includes('--expect-blocked');
+const scopeArg = process.argv.find((a) => a.startsWith('--scope='));
+const scope = scopeArg ? scopeArg.slice('--scope='.length) : 'full';
+if (!['full', 'patent'].includes(scope)) fail(`未知视图 --scope=${scope}（支持 full | patent）`);
 const tmp = mkdtempSync(join(tmpdir(), 'bwm-release-audit.'));
 let ok = true;
 try {
@@ -465,6 +527,10 @@ try {
     const verdictOk = real.pass ? true : redByKernelGuardOnly(real);
     console.log(`  真实产物判定: ${real.pass ? '绿牌（产物清洁——内核已迁出 bundle，解冻态）' : `红牌（仅内核守卫所致 = ${redByKernelGuardOnly(real) ? '是' : '否'}）`} → ${verdictOk ? '✅ 判定正确' : '❌ 红牌非内核守卫所致，或含 a/b/P 类违规，须人工核查'}`);
     ok = baitCaught && evidenceClean && evidenceMarked && verdictOk;
+  } else if (scope === 'patent') {
+    // 专利专用视图：只验受控实现离包，不看公开 runtime 面（R79 条件 1）
+    const real = auditRealPack(tmp);
+    ok = patentScopeVerdict(real);
   } else {
     const real = auditRealPack(tmp);
     if (real.pass) {
@@ -475,6 +541,8 @@ try {
         ok = true;
       }
     } else if (expectBlocked) {
+      // 条件 6（R79）：冻结期放行必须带有效期与解冻依据，不得永久常开
+      checkFreezeDeclaration();
       // P0-2（P0-D 中4）＋增量2（派单①）：--expect-blocked 只豁免「内核守卫所致的红牌」——
       // [a]（packages 域白名单外）/ [b]（零豁免路径）违规不得被冻结期口径掩盖；
       // 任何 P 类命中（P-word 字样 / P-sec/P-app/P-pub 形态）冻结期一律不放行（与 F/c 共存同样阻断）

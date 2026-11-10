@@ -1,0 +1,20 @@
+{
+  "name": "@laikaton/bwm-cognitive-core",
+  "version": "0.2.0",
+  "description": "BWM Cognitive Core (PRIVATE) — 受控实施例 A 关系账本 + 受控实施例 B 感知路由器 + 边界接线。含未公开受控实现，禁止发布到任何公开 registry，禁止内联进公开包。",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "files": [
+    "src/"
+  ],
+  "keywords": [
+    "bwm",
+    "controlled-core",
+    "relationship-ledger",
+    "perception-router"
+  ]
+}

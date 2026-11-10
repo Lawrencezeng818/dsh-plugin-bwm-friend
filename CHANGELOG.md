@@ -1,5 +1,323 @@
 # Changelog
 
+## 0.8.35 (2026-11-10) · B 批：会话区 / 输入区逐项对齐发布版
+
+> 承接 0.8.30–0.8.34（A 批骨架）。来源仍是 `dsh-plugin-bwm-friend-0.8.0/lib/client.js`
+> 的 `EMBEDDED_CSS`（1377-1488），但那份表按 0.8.x 的 hashed 类名写（`.p7GS4W_*` /
+> `.PNUCKq_*` / `.eLe3jW_*`），0.2.2 哈希前缀全变（实测当前 InputBar = `JZLxKW_*`），
+> 故**按语义选择器（`[class*=xxx]`）重写**，逐条注释标明对应行号。
+
+### 已搬（B 批，9 组）
+
+| # | 发布版行为 | 落地 |
+|---|---|---|
+| ① | 会话头 76px 两行 → **44px 单行**（titleRow + tabs 同行） | 保留网格、把 `.tabs` 从「跨列第二行」搬到「第 3 列第 1 行」，行高锁 44px；`headerBlank`（hero 空态）不套用 |
+| ② | 会话区隐藏滚动条、composer 内列表恢复细滚动条 | 作用域限定 `[class*=mainPanel]`（整页 `[class*=list]` 会裁掉模型菜单） |
+| ③ | `composerSeat` 贴底 + `padding: 14px 4px 6px 0` | 同值 |
+| ④ | 输入文字 `#e8efec`、placeholder `rgba(223,231,228,.55)` | 同值（不钉就走宿主变量，偏冷偏亮） |
+| ⑤ | 模型名白 + **effort 值青 `#7bf2d2`/600** | 同值（0.2.2 的 `Default` 原本是灰的，实测已补回青色） |
+| ⑥ | `trailing` 不换行、ContextMeter 圆环不被撑满 | `[class*=trailing]` 与 `[data-slot="conversation.input.model"]` 同值 |
+| ⑦ | `heroGlow` 隐藏 | 同值（0.2.2 无此类名 = 无害死规则，留作升级对账） |
+| ⑧ | ask/附件卡防横向截断 | `section[class*=card]` 两处挂载位都约束 max-width |
+| ⑨ | 窗口 <560px 压缩 composer clearance | 同值 |
+
+### 十、0.2.2 新增的「局部深色」组件（发布版没有，属增量修复）
+
+`ui-deliverables`（交付文件卡 / 变更文件）、`ui-plan`（计划卡）把深色**写死在
+`:global(body[data-ds-dark-theme])`** 里，不走 `--dsw-*` 调色板。本仓只做 CSS 作用域、
+不切宿主主题属性 ⇒ 它们退回浅色：实测交付卡底色 `rgb(250,250,250)` **纯白**，
+在深色幕布上是一块白板（用户视角最刺眼的一处不一致）。
+→ 在对话面板内重声明 `--deliverable-fill/-hover`、`--changes-fill/-hover`、
+`--plan-card-fill/-hover`（宿主深色块同值 neutral-850/800）+ 图标托底 `5% 白`。
+
+### 踩坑记录（三个，都实测）
+
+1. **不能把 header 改成 flex**：0.2.2 的 `.titleRow` 带 `container-type: inline-size`（内联轴尺寸包含），
+   一旦成为 flex 项，固有宽度=0 → 标题整行消失、tabs 挤到最左（0.8.35 首次构建实测）。
+   **保留 grid、改 tabs 的 grid-column** 才对。
+2. **tabs 被折进 ⋯ ≠ CSS 放不下**：DSH 用**行宽估算**决定露几个 tab
+   （`ConversationSession.tsx:127` → `floor((row.clientWidth-48)/120)`，每 tab 记 120px）。
+   `width:max-content` 把行宽压到 ~60px → 只露 1 个。必须 `min-width: 288px`（2 槽 = 2×120+48）。
+3. **照搬 `viewArea{flex:1 1 auto; min-height:0}` 会把输入框弄丢**：0.2.2 的滚动容器是
+   `.scrollBody`，viewArea 必须保持原生 `flex:1 0 auto; min-height:auto` 才能把高度撑出来。
+   实测（临时 DOM 探针）：viewArea 被压到 466px 后 `composerSeat.offsetTop` 从 4463 掉到 466，
+   输入卡整体跑到 y=-3378（屏幕外），界面上只剩消息、输入框消失；`position:sticky` 也失效。
+   **探针 A/B 法**（`skin.disabled=true` 再量一次）5 分钟定位，比逐条猜快得多。
+
+### 验证
+
+- 探针实测：`SEAT y=628 / offTop=4623`（贴底、sticky 生效），交付文件卡 `--deliverable-fill` 已走 dark。
+- `npm run test:pack` 15 项全 PASS。
+
+## 0.8.30–0.8.34 (2026-11-10) · A 批骨架对齐（发布版 topbar + 去掉注入态多余控件）
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10
+> **「1:1 对标发布版"= 删掉语音球；A 批（骨架对齐）」**
+
+### 一、先行事实（决定了这批的性质）
+
+发布版的干活页**不是向 DSH 根页面注入**，而是 Host 生成的独立页 `/bwm-friend/work/`：
+`topbar(78px)` + `dialogue-panel`（左，内嵌原生 DSH iframe）+ `presence-panel`（右舞台）。
+`lib/client.js:1814` `if (!isBwmPage) return () => {}` —— 根路径操作是**彻底空操作**。
+桌面壳 `dsh-app://` 下无法内嵌 DSH（子 iframe 拿不到 `__DSH_BOOT__`），只能把同一套骨架叠在根页面上。
+
+### 二、已搬（A 批）
+
+| # | 发布版 | 落地 |
+|---|---|---|
+| 1 | `topbar` 78px：`fixed/z15/grid 1fr auto/padding 0 34px/border-bottom rgba(255,255,255,.055)/linear-gradient(180deg,rgba(8,13,22,.94),rgba(8,13,22,.45))/blur(16px)`；左 brand-mark 54×54（radius13 + 青辉 `0 0 18px rgba(123,242,210,.35)`）+ `Bwm Friend`(600/13px/字距.22em) + `be water my friend`(8px/#87928f/.16em)；右 配额徽标 + 设置圆钮 + `陪伴`胶囊 + `☰ 工作区`胶囊 | `#bwm-topbar`（`ensureTopbar()`），数值逐项对 `static-ui/styles.css:86-144/187-215/2092-2103` 与 `lib/index.js:1475-1481(mkBtn)` |
+| 2 | 对话面板 `padding: clamp(118px,14vh,154px) 0 42px`（给 topbar 让位） | `ADAPTER_DSH_022.setWorkLayout()` 在对话列上等价设置（`box-sizing:border-box` 保证总高仍 100vh） |
+| 3 | work 态左右内边距归零 | 同上（`padding` 左右 0） |
+| 17 | 模式切换 = topbar 的 `陪伴`胶囊（固定文案） | 桌面壳不再建右下角悬浮胶囊，`ensureToggleButton()` 直接返回 topbar 那枚（`data-bwm-static-pill` 关掉文案跟随与拖拽） |
+| 18 | `☰ 工作区` 在 topbar 动作区 | 桌面壳不再建左上角悬浮 `#bwm-sidebar-toggle`（原与 78px topbar 同坐标互压），复用 topbar 胶囊 |
+| 11 | 发布版干活页**没有**语音球 | 桌面壳不执行 `ensureBwmComposer()`（web 形态保持原样），同时消掉「两个发送键 + 语音球挤在 placeholder 前」 |
+
+### 三、过程中核出的两个真实缺陷（已修）
+
+1. **交通灯压住品牌图标**：窗口是 `hiddenInset`，红黄绿浮在内容上约 70px，发布版 `padding:0 34px` 是浏览器页的值。
+   → 顶栏改 `padding: 0 34px 0 92px`；陪伴页（静态壳）由 `desktop-shim.js` 仅在 `location.protocol==='dsh-app:'` 时注入
+   `.topbar{padding-left:92px}`，**web 形态一个字节不改**。
+2. **工作区抽屉透底不可读**：`transparentizeSurfaces()` 已把侧栏底色清成透明，滑出后直接透出聊天正文。
+   → `.bwm-sb` 补发布版 `#bwm-workspace-pop` 的玻璃底（`rgba(10,16,26,.55)` + `blur(18px) saturate(.9)` + 青边 + 阴影），
+   层级抬到 topbar 之上（发布版弹窗 z80 > topbar z15 同关系）。
+
+### 四、踩坑记录（下次别再犯）
+
+- **模板字符串里写不了反引号**：CSS 注释里写 `` `#bwm-workspace-pop` `` 直接截断模板 → 打包后语法错误 →
+  DSH 启动报 “@dsh-plugin-bwm-friend: import failed”。**凡是往 CSS 模板里写注释，一律不用反引号**；
+  打包链必须 `node --check lib/client.js` 后才 `npm pack`（这次就是漏了这一步）。
+- `npm run test:pack` **15 项全 PASS**（tarball 边界 / 协议随包 / 静态壳随包 / 三端点 200 / 注入 JS 完整伺服）。
+
+## 0.8.29 (2026-11-10) · 配色核对 + 桌面适配与可发布代码隔离
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10
+> **「请你核对清楚，你哪有跟那个发布插件的是同样的颜色呢？你现在改的不是插件的代码吗？我未来要发布插件的哦。」**
+
+### 一、核对结论（代码级，非目测）
+
+把发布产物 `dsh-plugin-bwm-friend-0.8.0.tgz` 的全部颜色字面量抽出来与当前 `lib/client.js` 做集合比对：
+
+- 发布版色值 **43 个**，当前产物缺失 **0 个**。
+- 关键值逐个在位：`#e8efec`(白字) / `#7bf2d2`+`#52fefe`(青渐变) /
+  `rgba(8,13,22,.9)`(幕布) / `rgba(123,242,210,.55)`(青边) / `rgba(123,242,210,.15)`(顶栏底边)。
+
+### 二、核出的 3 个真实偏差（已修）
+
+| 偏差 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 输入卡不透明 | 内部 `#151517` 实心灰，发布版透幕布 | 两条覆盖变量写在 202 条调色板**之前**，被同名变量覆盖（同规则内后者胜） | 移到调色板之后 |
+| 仍是实心块 | 卡片透明了但透出外层 hero 的 `--dsw-alias-bg-base` | composer 容器未清底 | 照发布版 `EMBEDDED_CSS` 清 `composerSeat/composerStack` 容器底 |
+| 青边看不见 | 只有约 0.5px 的 elevation `box-shadow` 描边 | DSH 原生画法，非发布版的实心 border | 卡片改 `border: 1px solid rgba(123,242,210,.55)` + `box-shadow: none` |
+
+### 三、可发布性隔离（回应「我未来要发布插件」）
+
+之前把「桌面 App 宿主适配」直接塞进了 `PRESENCE_CSS`，会随包发到浏览器。现已拆开：
+
+| 常量 | 内容 | 何时加载 |
+|---|---|---|
+| `PRESENCE_CSS` | 发布版原设计样式（**0** 个宿主变量、**0** 个 `100vw` 桌面适配） | 全部形态 |
+| `DESKTOP_WORK_SKIN_CSS` | 宿主环境适配 + 干活模式配色（205 处 `--dsw-*`、205 行调色板） | **仅 `isDesktopShell()`**，`injectDesktopWorkSkin()` 幂等注入 |
+| `EMBEDDED_CSS` | iframe 内嵌原生 DSH 会话视图的皮肤（发布版原有） | web 嵌入页 |
+
+验证：`npm run test:pack` **15 项全 PASS**（含 tarball 内容边界、协议随包、端点 200、注入 JS 完整伺服）。
+
+### 四、仍存在的观感差异（不是色值差异）
+
+输入卡内部实测 `#201c1c`（我的）vs `#11151d`（发布版）。原因是幕布 `rgba(8,13,22,.9)` 半透明，
+底下透出的是**不同的视频画面**——发布版那张背后是暗处，当前窗口背后是暖色人物。色值同源，混色结果随背景变。
+
+### 五、未做（等指令）
+
+发布版干活页顶部的 Bwm Friend 品牌栏（logo + 名称 + 陪伴/—/⧉/工作区）尚未搬到桌面壳；
+当前顶部是 DSH 原生会话工具条（已深色化 + 青底边）。属布局控件差异。
+
+## 0.8.24 (2026-11-10) · 配色 1:1 复刻发布版，不再借用 DSH 官方主题
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10
+> **「你为何要用官方的主题颜色呢？我要你 1:1 复刻这个已经发布过的插件版本的配色，就是深色配白色，还有一些渐变。」**
+
+### 上一版错在哪
+
+0.8.20–0.8.23 为了把「深色幕布 + 浅色文字」做出来，去切换 DSH 的全局深色主题
+（`body[data-ds-dark-theme]` + `color-scheme:dark`）。方向错了：那是**给宿主换肤**，
+不是复刻插件配色；而且 DSH 的 `ThemeService` 会按持久偏好抢回浅色，只能靠
+`MutationObserver` 持续抢，越抢越乱（实测「陪伴 ⇄ 干活」往返后左侧变白）。
+
+### 本版做法：纯 CSS 作用域，零 JS
+
+发布版的真实配色 = **DSH 深色调色板** + **插件自有色值**。两者都限定在干活模式的
+聊天面板内重声明，开关只有 `body[data-bwm-mode='work']`：
+
+| 配色来源 | 落地方式 |
+|---|---|
+| DSH 深色调色板（202 条 `--dsw-static-*` / `--dsw-alias-*`） | 复制自 `design-platform.css` 的 `body[data-ds-dark-theme]` 两块，作用域改为 `body[data-bwm-mode='work'] [class*=mainPanel]` |
+| 白字 `#e8efec` | 面板 `color` |
+| 青色细边 `rgba(123,242,210,·)` | 输入卡片 `border` / 顶栏 `border-bottom` |
+| 青色渐变 `linear-gradient(135deg,#7bf2d2,#52fefe)` | 发送键 `background` |
+| 深色幕布 `rgba(8,13,22,.9→.12)` + `blur(16px)` + mask 渐隐 | 原设计值，**未改一个字节** |
+
+因为不碰宿主主题属性，所以：不会被 ThemeService 抢、陪伴模式（全屏 iframe）与侧栏不受影响、
+退出干活模式配色自动消失无需还原、`cordis.patch.yml` 的 `ui-theme` 已恢复 `light`。
+
+**删除**：`setHostDarkTheme()`、`darkKeeper`、`adaptScrimToTheme()`、`#bwm-scrim.bwm-scrim-light`
+（浅色幕布变体是我为绕过浅色 UI 自创的，发布版没有）。
+
+**验证**：DSH 全局浅色（`preference: light`）下，干活模式实测为深色底 + 白字 + 青边 + 青渐变发送键，
+与发布版 `dsh-sandbox/work-bot.png` / `work-crop.png` 逐项一致；任务 ⇄ 陪伴往返后保持深色。
+
+## 0.8.23 (2026-11-10) · 干活模式与发布版 1:1（Work Mode Parity with Published Build）
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10
+> **「我要求你参照原先发布过的插件的整个布局控件，所有的东西跟它一致，听明白吗？」**
+
+### 真正的差异不在插件，在 DSH 主题
+
+对照发布产物 `dsh-plugin-bwm-friend-0.8.0.tgz` 逐项核对，布局控件本来就已一致
+（`.bwm-layer` 全屏 cover、`#bwm-scrim` 左 `clamp(620px,58vw,940px)` 深色幕布 + `blur(16px)` + mask、
+聊天根 fixed 左 0 同宽全高 z-index 6、`transparentizeSurfaces()` ≥35% 视口清底、
+`.bwm-sb` ☰ 抽屉、同一按钮切模式）。
+
+唯一不一致的是**明暗**：发布版是在**深色 DSH** 上出的图（`dsh-sandbox/work-chat-visible.png` 为证），
+而 desktop profile 的 `ui-theme` 持久偏好是 `light`，早前版本被迫用「浅色幕布」绕，
+导致整体成了浅色工作台。
+
+### 修正
+
+- **干活模式用 DSH 官方深色主题**：`data-ds-dark-theme` + `color-scheme:dark`
+  （即 `packages/client/ui-theme/src/boot-theme.ts` 用的同一对开关，配色来自
+  `design-platform.css` 的 `body[data-ds-dark-theme]` 变量块，不另造色板）。
+  于是幕布回到原设计的 `rgba(8,13,22,.9)`，正文是主题给的浅色 `rgb(249,250,251)`。
+- **深色只在启动时设一次**：DSH 的 `ThemeService` 会按持久偏好重写 body 属性，
+  实测「陪伴 ⇄ 干活」往返时属性会被抢回浅色（左侧变白）。改为启动时设定 + `MutationObserver`
+  幂等保持，不再随模式切换反复抢占。
+- `adaptScrimToTheme()` 保留为兜底：深色 UI 下不激活，只有 UI 真被改回浅色时才换浅色雾面。
+
+### 保留
+
+- 右侧预览列让位（`.bwm-rb`，0.8.19 裁决）。
+- 桌面环境适配：`.bwm-layer` 显式 `100vw/100vh`、按钮 z-index 提到 `2147483000`
+  （DSH 的 `overlayLayer` 会吞点击）、`desktop-shim.js` 的 `postMessage('*')`。
+
+### 实测
+
+干活模式左侧为深色磨砂、正文浅色清晰、右侧数字人铺满无残留；陪伴模式为完整原设计页面；
+cliclick 往返「干活 → 陪伴 → 干活」后仍保持深色，不再变白。
+
+## 0.8.19 (2026-11-10) · 干活模式回归原设计（Work Layout Reverted to Original）
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10「要做，我就照原设计搬那套注入」→
+> **「请你不要自己在这里摸索，不是有参考的那个插件的代码吗？你为什么自己改呢？」**
+
+### 教训：桌面适配只许换选择器，不许改布局语义
+
+0.8.7–0.8.15 在桌面壳里自创了三处原设计没有的东西，已全部回退：
+
+| 自创 | 原设计（`ADAPTER_DSH_0823`，一字不动） |
+|---|---|
+| `transparentizeSurfaces()` 覆写为「跳过对话面板、保留原生底色」 | 清掉**所有**占屏 ≥35% 的面板底色，玻璃底交给幕布 |
+| 新增 `pinWorkLayout()` + 「不强制清底」 | `setWorkLayout()` = 透明化 + 钉 `clamp(620px,58vw,940px)` + `background:transparent` |
+| 把 `#bwm-scrim` 塞进 `#bwm-layer` 内部 | 幕布独立挂 body、z-index 5；chatRoot z-index 6 在其上，本就不会虚化聊天 |
+
+`ADAPTER_DSH_022` 现在只覆盖 `selectors / locatorStrategies / getChatRoot / getSidebar`——
+四个全是 DSH 0.2.2 换 DOM 后的必然差异；布局、透明化、还原一律 `call` 原实现。
+
+### 修正
+
+- **挂载点回到 `document.body`**：0.8.7 判定「桌面壳 body/#root 有 filter 造包含块」并改挂 `<html>`，
+  0.2.2 实测 `body` 的 `filter` 为 `none`——错误归因，已撤回。层物理尺寸实测
+  `layer [0,0,1280,820]` / `scrim [0,0,742,820]` / `chatRoot [0,0,742,820]`，全部正确。
+- **幕布明暗跟随主题**（`adaptScrimToTheme()`）：原设计幕布写死深色 `rgba(8,13,22,.9)`，
+  因为 2026-08 的 DSH 是深色 UI；0.2.2 **只有一套浅色主题**（源码无任何深色变量），
+  深色幕布 + 深色正文 = 对比度≈0。遂按正文色相对亮度切换 `.bwm-scrim-light`，
+  **只换色值**，位置/宽度/渐变角度/遮罩渐隐/`backdrop-filter` 与深色版逐项一致。
+  将来 DSH 若提供深色 UI，自动回到 1:1 原始观感。
+
+### 新增（0.2.2 出现的新元素，原设计无对应）
+
+- **右侧预览列让位**：0.2.2 新增 `rightbarCol`（576×820）正好压在「左聊天 + 右舞台」的舞台位上，
+  其 chrome 浮在数字人身上。干活模式给它挂 `.bwm-rb`（`translateX(101%)`，与左侧 `.bwm-sb`
+  同款位移机制、方向相反），切回陪伴 / 退出干活时移除 class 复位。
+
+### 保留的桌面环境适配（均不改设计语义）
+
+`.bwm-layer` 显式 `100vw/100vh`；`#bwm-toggle` 与 `#bwm-sidebar-toggle` 抬到
+`z-index 2147483000`（DSH 自带 `overlayLayer` 会吞掉点击）；`desktop-shim.js` 的 `postMessage('*')`。
+
+### 实测
+
+cliclick 点击切换按钮往返 **干活 → 陪伴 → 干活** 成功，按钮命中正常；右侧预览列滑走后无残留。
+
+## 0.8.6 (2026-11-10) · 桌面壳入口（Desktop Shell Entry）
+
+> 裁决出处：`boss-lectron-ceo` 对话 2026-11-10「按 A 开工」→「默认进干活模式」→
+> **「陪伴模式不是在最右侧搞个视频，它是完整的，整个界面都进行了调整，被你改得乱七八糟的」**
+> （第三条推翻了前两条的「右侧停靠栏」做法；0.8.1–0.8.5 为本地试错版本，未发布，改动已全部回退）
+
+### 原则：桌面壳只补入口，不改页面
+
+陪伴模式一律加载**完整的 `/bwm-friend/companion/`**——顶栏（品牌/配额/设置）+ 左对话面板
+（当前回复/最近对话/输入框/语音球/发送）+ 右数字人舞台 + 设置抽屉，整幅界面原样。
+静态页、样式、原有注入脚本**零改动、零覆盖样式注入**。
+
+### 新增
+
+- **悬浮切换按钮**（仅 `location.protocol === 'dsh-app:'` 时挂载，样式照抄原 `ensureToggleButton`）：
+  文字随模式切换「陪伴」⇄「干活」（原 `MODE_LABELS`），点一次进覆盖层、再点退出——
+  即原设计 `wireToggle` 的同一按钮切模式行为。
+- **覆盖层**：全屏 iframe 加载 `/bwm-friend/companion/`，懒加载（首次点击才请求）。
+- **`desktop-shim.js`**（host 半新增，仅 iframe 内生效）：把页内 Esc 与顶栏「干活」按钮的意图
+  用 `postMessage('*')` 回传父窗口；web 直连本页时 `window.parent === window` 立即退出，零影响。
+
+### 实测修正（三轮，均已真机验证）
+
+1. **覆盖层只铺左上角一小块** → DSH 的 body/#root 上有 `filter`/`backdrop-filter`，会给
+   `position: fixed` 后代造包含块。改挂 `document.documentElement` 并显式 `100vw/100vh`。
+2. **页内 `postMessage` 收不到** → 自定义协议下 `location.origin` 退化为 opaque（`"null"`），
+   `targetOrigin` 不匹配导致消息被丢弃；改由 shim 发 `'*'`，父侧按 `data.type` 判定。
+3. **覆盖层打开后入口按钮被隐藏** → 等于没有退路。改回原设计的「同一按钮切模式」。
+
+### 不变（硬约束）
+
+- **web 浏览器形态零变化**：协议不是 `dsh-app:` 时该分支根本进不来；`/bwm-friend/*` 页面零改动。
+- DSH 根路径原生界面不重绘、不读写任何 hashed 类名。
+
+### 验证（真机 macOS DeepSeek Harness 0.2.2-rc.1）
+
+- `test:core` 78/78 PASS · `test:artifact` PASS
+- 启动 = 原生干活界面 + 右下角「陪伴」；点击 → 完整 Bwm Friend 整屏（数字人视频在播）；
+  Esc 或点「干活」→ 回原生，按钮回到「陪伴」。
+- 未覆盖：语音（`XIAOMI_MIMO_API_KEY` 未注入 App 进程 → `voice.configured=false` 显式降级）。
+
+## 0.8.0 (2026-11-01) · P1-lite：受控认知内核离包（R2 结构整改）
+
+> 裁决出处：`boss-lectron-ceo/decisions/决策记录_2026-10-31_BWM付费形态与身份资产共享裁决.md`
+> 取证与复核：`docs/` 2026-11-01 P0 取证报告 §八 · R79 独立复核（深度档）
+> 性质：**breaking（内部语义）**——公开包导出面与 `createRuntime()` 返回值同时收窄。npm 侧 0.7.x 从未发布，故无外部用户受影响。
+
+### 变更（安全 / 合规）
+- 🔒 **受控认知内核迁出公开包**：关系账本（六步机制链）、感知路由器、感知-账本桥接三者，自 `@laikaton/bwm-runtime-core` 迁往新私有包 `@laikaton/bwm-cognitive-core`（`private: true` + `UNLICENSED`，永不发布、永不内联）
+- 🔒 **构建内联清单减两条**（`scripts/inline-modules.mjs`）：产物 `lib/client.js` 由 **157.8KB → 91.5KB（-42%）**，产物内受控实现标记 **全部 0 命中**
+- 🔒 **`createRuntime()` 收窄**：移除 `relationshipLedger` 返回值与 `opts.relationshipLedger` 入参；包导出面移除 `createRelationshipLedger` / `RULE_TABLES` / `LEDGER_ERRORS` / `bridgePerceptionToLedger` / `createPerceptionRouter` / `DOMAIN_CLASS` / `UPDATE_MODES` / `PERCEPTION_ERRORS` 共 8 项 + 桥接 1 项
+- ✅ **业务影响为零**：取证确认 client / host / sdk 对上述符号**全部零消费**，真实影响仅为包接口面收窄
+
+### 门禁（R79 六条件落地）
+- ➕ 新增受控核验专用视图（`--scope=<受控标识>`，取值见 `scripts/audit-release.mjs` 头注）：只验「受控实现是否离包」（F7/F8 + 受控字样 + 标识形态 + a/b 边界），与全量门禁**并存不替代**；解冻 F1–F6 须另起独立裁决（条件 1/5）
+- ➕ `scripts/freeze-declaration.json` + 强制校验：`--expect-blocked` 必须附 `until` / `basis` / `ref`，缺失、非法、过期一律拒绝放行（条件 6）
+- 🔄 `tests/build-artifact-parity.mjs` 断言**反转**：受控实现由「必须存在」改为「必须不存在」，与 audit F7/F8 构成双保险（条件 4）
+
+### 验证留痕
+- `test:core` **78/78 PASS** · `test:artifact` **PASS** · `test:pack` **ALL PASS** · 私有包独立 `node --test` **71/71 PASS**
+- `npm pack` tarball 31 文件，`cognitive` / `perception-router` / `relationship-ledger` / `runtime-core` **0 命中**
+- 全量审计：`[a]×0 [b]×0 [P]×0`、`F7/F8 消失`；残留 `[F1–F6]×6` 与 `[c]×33` 属公开 runtime 面，**待知识产权线复核归属**，不视为已解冻
+
+### 已知敞开（不粉饰）
+- 受控词口径未统一：本文件含受控字样，故 `docs/` 分类判据已将其列入「⛔ 出包」，不随 tarball 分发
+- F1–F6（EventBus retained 快照 / generation 代次）仍在公开产物内，其是否属受控实施例**待知识产权线仓裁定**；冻结期放行凭 `freeze-declaration.json`，有效至 2027-01-31
+
+## 0.7.5 (2026-10-0X) · 未定版（本地开发版本，未发布）
+
+> 该版本号在本地推进多轮私有化改造，未经发布；功能变更并入 0.8.0 一并说明。
+
 ## 0.7.4 (2026-09-26) · 移除「引擎设置」（用户裁决：不需要这个东西）
 
 - 🗑 **整体移除引擎设置四件套**（用户实测反馈：点「设置」出现来历不明的「引擎设置」）：①设置面板「⚙ 引擎设置」快捷入口与引擎区块；②居中模态（MODAL_CSS/buildModal/openEngineModal + bwm-open-settings 监听）；③**work/companion iframe 内对原生 DSH「设置」按钮的劫持注入**（含 1.5s 永久轮询的 tryWire——违背「原生 100% 原生」架构原则的皮肤层越界，正是用户点设置看到引擎设置的直接原因）；④工作区弹窗内的 wirePopSettings 同类劫持

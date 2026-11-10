@@ -106,12 +106,22 @@ for (const [label, needle] of [
   ['关系域初值（专利1 [0041]）', 'relationship: { stage: RELATIONSHIP_POLICY.stage'],
   ['关系事件接线（专利1 [0071]）', 'wireRelationship(bus, context)'],
   ['域计数单一来源', 'domains: CONTEXT_DOMAINS.length'],
-  ['感知路由器（专利5）', '__bwmModules["./perception-router.js"]'],
-  ['关系账本（专利4）', '__bwmModules["./relationship-ledger.js"]'],
-  ['关系账本六步桥接', 'bridgePerceptionToLedger'],
-  ['确定性增量规则表', 'rules-v1.0'],
 ]) {
   check(bundleText.includes(needle), `产物含实现特征：${label}`);
+}
+
+/* ── 3b. 专利 4/5 必须离包（2026-11-01 P1-lite · R79 条件 4）──
+ * 这四条原先断言「必须存在」，现反转为「必须不存在」：
+ * 存在即意味着专利实施例随公开包分发 → 专利自我公开（R2）。
+ * 与 audit [F] F7/F8 互为双保险：audit 看构建标记，此处看产物全文。
+ */
+for (const [label, needle] of [
+  ['专利5 感知路由器内联注册标记', '__bwmModules["./perception-router.js"]'],
+  ['专利4 关系账本内联注册标记', '__bwmModules["./relationship-ledger.js"]'],
+  ['专利4 六步桥接实现', 'bridgePerceptionToLedger'],
+  ['专利4 确定性增量规则表', 'rules-v1.0'],
+]) {
+  check(!bundleText.includes(needle), `产物不含专利实现：${label}`);
 }
 
 console.log('');

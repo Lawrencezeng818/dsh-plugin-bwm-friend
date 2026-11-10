@@ -10,20 +10,12 @@
  * 后续引入真正 bundler 后拆分 src/event-bus.js / src/runtime.js / src/index.js。
  */
 
-/* ── 感知路由器（跨域路由与一致性编排，纯逻辑）── */
-const {
-  createPerceptionRouter,
-  DOMAIN_CLASS,
-  UPDATE_MODES,
-  PERCEPTION_ERRORS,
-} = require('./perception-router.js');
-
-/* ── 关系账本（六步机制链：准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入，可验证可重放）── */
-const {
-  createRelationshipLedger,
-  RULE_TABLES,
-  LEDGER_ERRORS,
-} = require('./relationship-ledger.js');
+/* ── 认知内核实现已于 2026-11-01 P1-lite 迁出本包（R2 受控面）──
+ * 迁往 @laikaton/bwm-cognitive-core（私有 · 永不发布）：感知路由器、关系账本、六步桥接。
+ * 依据：取证报告_2026-11-01_P0 与 R79 复核；业务侧零消费（client/host/sdk 均无调用），
+ * 离包不影响任何运行时行为。禁止在此重新 require ——audit [F] F7/F8 会拦。
+ * 注①：本注释刻意不写具体文件名/符号名，也不含受控词表用字，避免随产物内联后干扰离包断言。
+ */
 
 /* ── Event 版本登记（Additive-only；载荷演进 bump，订阅方按 version 兼容解析）── */
 // 与 docs/BWM-PROTOCOL-v1.md §2.1 一致（审计：协议枚举 ↔ 代码完全一致）
@@ -593,53 +585,6 @@ function createRequestMachine(bus, context) {
   return () => off.forEach((d) => d());
 }
 
-/**
- * 感知-账本边界接线：把感知路由器产出的「候选写入指令」消费为关系账本条目。
- *
- * 感知路由器只决策"某域是否允许写入"，**不做关系增量计算、不写关系账本**（其文件头声明）；
- * 本函数即那条声明所指的「账本端」——准入后的确定性增量计算与账本写入由关系账本模块独占。
- * 共享事件标识（update.eventId）在此串联感知侧与账本侧，保证同源可溯。
- */
-function bridgePerceptionToLedger(ledger, update, opts = {}) {
-  if (!ledger || !update) return { ok: false, error: 'missing_ledger_or_update' };
-  // 准入复核（P1 修复 · 家族边界：账本端独占最终准入）：仅当指令确实落在持久域（ledger）
-  // 且获准持久化（PERSIST）才可进账本；易失/延迟/拒绝指令被强行桥接时拒绝并如实返回，
-  // 持久化准入不可经桥接旁路。
-  if (update.domain !== 'ledger' || update.mode !== UPDATE_MODES.PERSIST) {
-    return { ok: false, error: 'not_persist_granted', domain: update.domain || null, mode: update.mode || null };
-  }
-  const payload = update.payload || {};
-  return ledger.submit(
-    {
-      eventId: update.eventId,                 // 共享事件标识（跨域串联）
-      eventType: opts.eventType || 'companion_chat',
-      summary: payload.summary || '',
-      contextRef: opts.contextRef || null,
-      presenceState: opts.presenceState || null,
-      evidenceSource: 'perception',            // 感知派生事件 → 置信度系数 = 显著性÷10
-      subjectId: update.subjectId,
-      relationScope: update.relationScope,
-      salience: payload.salience == null ? 0 : payload.salience,
-      confidence: opts.confidence == null ? 1 : opts.confidence,
-      // 确认标记透传（账本端 admit 二次门复核）：优先取调用方显式值，否则取路由指令携带的确认信息
-      userConfirmed: opts.userConfirmed != null
-        ? !!opts.userConfirmed
-        : (payload.sourceType === 'explicit_share' || payload.userConfirmed === true),
-      at: update.at,
-    },
-    {
-      binding: {
-        subjectId: update.subjectId,
-        relationScope: update.relationScope,
-        evidenceSource: 'perception',
-        basis: 'perception_route_permitted',
-      },
-      snapshot: opts.snapshot || {},
-      at: update.at,
-    }
-  );
-}
-
 /* ── Runtime 协议面（BWM Protocol v1：hello/welcome + subscribe/emit）── */
 function createRuntime(opts = {}) {
   const bus = createEventBus();
@@ -649,8 +594,6 @@ function createRuntime(opts = {}) {
   // opts.ledger = 账本 store（Shell 提供）：事件逐条落盘 + 启动恢复（B2 实现链）
   wireLedger(bus, context, opts.ledger ? { store: opts.ledger } : {});   // Ledger Runtime（事件 → timeline/tasks）
   wireRelationship(bus, context);      // Relationship Runtime（行为事件 → 关系状态/亲密度）
-  // Relationship Ledger（六步机制链）：候选事件 → 准入 → 绑定溯源 → 快照 → 确定性增量 → 账本写入
-  const relationshipLedger = createRelationshipLedger(opts.relationshipLedger || {});
   createPresenceMachine(bus, context); // Presence 状态机（事件 → presence 状态）
   createRequestMachine(bus, context);  // Request 状态机（conversation.requestState 防重复）
   let handshake = null;
@@ -659,7 +602,6 @@ function createRuntime(opts = {}) {
     version: '1.0',
     bus,       // 事件总线（Shell 订阅渲染）
     context,   // 共享上下文（Shell 只读 runtime 域；shellSet 写 shared 域）
-    relationshipLedger, // 关系账本（可验证/可重放的关系资产；查询与重放由调用方使用）
     hydrateContext(raw) { context.hydrate(raw); }, // 快照恢复（runtime 内部，绕过 ownership）
     // Runtime v1.1：持久化快照（只含 persist 域——运行态不落盘，决策在 Runtime）
     persistSnapshot() {
@@ -701,10 +643,6 @@ module.exports = {
   createAgentContext,
   createPresenceMachine,
   createRequestMachine,
-  createRelationshipLedger,
-  RULE_TABLES,
-  LEDGER_ERRORS,
-  bridgePerceptionToLedger,
   wireLedger,
   updateTaskState,
   wireRelationship,
@@ -730,9 +668,4 @@ module.exports = {
   negotiate,
   compareVersion,
   RUNTIME_CAPABILITIES,
-  // 感知路由器：感知事件的跨状态域路由与一致性编排
-  createPerceptionRouter,
-  DOMAIN_CLASS,
-  UPDATE_MODES,
-  PERCEPTION_ERRORS,
 };
