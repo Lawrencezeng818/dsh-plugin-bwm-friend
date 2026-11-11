@@ -144,11 +144,20 @@ body[data-bwm-mode='work'] #bwm-scrim { display: block; }
 const DESKTOP_WORK_SKIN_CSS = `
 /* ── 一、宿主环境适配（不改设计语义）───────────────────────────────────────
    桌面壳 dsh-app:// 下：显式用视口单位，避免祖先参与层叠/包含块变化时百分比失真
-   （实测层物理尺寸 [0,0,1280,820] 正确）；DSH 自带 overlayLayer 会吞掉按钮点击，
-   故把 ☰ 抬到顶层（层序不变，仅脱离被遮挡）。 */
+   （实测层物理尺寸 [0,0,1280,820] 正确）。
+
+   ⚠️ 0.8.38 层级对齐发布版（创世者裁决：向 0.8.0 的做法对齐）：
+   发布版全套 z ≤ 81（mask 75 < 抽屉 80 < 顶栏按钮 81）；本皮肤曾把 z 拔到
+   2147482000+，实测后果是「个人」等 DSH 原生弹窗被全屏 scrim 压住、点击被吃
+   （DSH 弹层带 = 从宿主 asar 实测：dialog 1000/popover-backdrop 1003/菜单 1100/
+   chatPick 1200/onboarding 900）。现按 DSH 真实层级带重排：
+     内容 ≤101 · overlayLayer=20(pointer-events:none) · 【我们 110–140】
+     · onboarding 900 · dialog 1000–1003 · 菜单 1100 · chatPick 1200+
+   110–199 区间在 DSH 里完全空闲（asar 全量扫描）→ 我们的内容之上、一切弹层之下，
+   「点击外部关抽屉」保留，且不再吞任何原生弹窗的点击。 */
 .bwm-layer { width: 100vw; height: 100vh; }
 #bwm-scrim { height: 100vh; }
-body[data-bwm-mode] #bwm-sidebar-toggle { z-index: 2147483000; }
+body[data-bwm-mode] #bwm-sidebar-toggle { z-index: 140; }
 
 /* ── 一之二、2026-11-10 三 bug 修正 · 布局（桌面壳专属，发布包零影响）──────
    ① 会话标题行上移：ADAPTER_DSH_022.setWorkLayout() 把发布版 dialogue-panel 的
@@ -281,6 +290,14 @@ body[data-bwm-mode='work'] .bwm-sb {
   --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
   --dsw-alias-bg-multi-select: var(--dsw-static-neutral-850);
   --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-700);
+  /* 0.8.38 弹层表面色成对补齐（0.8.36「个人弹窗看不见」的配色侧根因）：
+     我们重声明了全部 label-* 文字变量（浅色）却漏了 bg-layer-*（弹层表面，
+     宿主 142+ 处消费）→ 弹层在作用域内变成「白底(原生浅色值)+白字(我们改的)」。
+     以下取 DSH 官方深色主题原值（asar 实测：light=bluish-00 / dark=875/850/800），
+     与 label-* 的浅色值成对，恢复 DSH 深色主题的原始映射。 */
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
   --dsw-alias-bg-skeleton: rgba(255, 255, 255, 0.08);
   --dsw-alias-border-inverted2: rgba(255, 255, 255, 0.08);
   --dsw-alias-border-inverted: rgba(255, 255, 255, 0.06);
@@ -641,7 +658,7 @@ body[data-bwm-mode='work'] [class*=mainPanel] [class*=_cardIcon] {
    发布版的 topbar 属于 Host 生成的独立页 /bwm-friend/work/；桌面壳无法内嵌 DSH
    （子 iframe 拿不到 __DSH_BOOT__），只能把同一套 topbar 叠在根页面上。 */
 #bwm-topbar {
-  position: fixed; inset: 0 0 auto; z-index: 2147482000; height: 78px;
+  position: fixed; inset: 0 0 auto; z-index: 120; height: 78px;
   display: grid; grid-template-columns: 1fr auto; align-items: center;
   /* 发布版是 padding: 0 34px（浏览器页，无窗口装饰）。桌面壳窗口用 hiddenInset，
      红黄绿三枚交通灯浮在内容之上、占据左侧约 70px —— 34px 会让 logo 压在交通灯下面
@@ -690,7 +707,7 @@ body[data-bwm-mode='companion'] #bwm-topbar { display: none !important; }
    桌面壳的「工作区」沿用 DSH 原生侧栏从左侧滑出（那一列本来就在左边），但必须补上同一套玻璃底：
    否则 transparentizeSurfaces() 已把它的底色清成透明 → 抽屉里直接透出聊天正文，完全不可读（实测）。 */
 .bwm-sb {
-  z-index: 2147482100 !important; /* topbar 之上：发布版弹窗 z80 > topbar z15，同层级关系 */
+  z-index: 130 !important; /* topbar(120) 之上、DSH 弹层(900+) 之下：发布版 mask75<pop80<btn81 的同款相对关系 */
   background: rgba(10,16,26,.55) !important;
   -webkit-backdrop-filter: blur(18px) saturate(.9); backdrop-filter: blur(18px) saturate(.9);
   border-right: 1px solid rgba(123,242,210,.25);
@@ -724,7 +741,7 @@ body[data-bwm-mode='work'] .bwm-sb [class*=newSession] {
 body[data-bwm-mode='work'] .bwm-sb [class*=newSession]:hover {
   background: rgb(255 255 255 / 0.2) !important;
 }
-#bwm-sidebar-scrim { z-index: 2147482050; } /* topbar 与抽屉之间 */
+#bwm-sidebar-scrim { z-index: 110; } /* topbar(120) 与抽屉(130) 之下、内容(≤101) 之上：点击外部关抽屉，但永不吞 DSH 弹层(900+) 的点击 */
 `;
 
 let desktopSkinDone = false;
@@ -1101,6 +1118,13 @@ const ADAPTER_DSH_0823 = {
       const targets = [];
       for (const el of document.querySelectorAll('body *')) {
         if (el.closest('#bwm-layer') || el.closest('#bwm-toggle')) continue;
+        /* 0.8.39 红线：只清「主干应用」（#root 子树）的遮挡面板。
+         * DSH 原生弹层（设置弹窗/菜单等 Modal）createPortal 到 body 直下、#root 之外，
+         * 是「原有就该不透明」的原生 UI——弹窗一打开 DOM 变化就触发 MutationObserver
+         * → 本函数把它（≥35% 视口的白色 Modal）当成遮挡面板清成透明，
+         * 内部小卡片 <35% 保留 → 用户实测「设置弹窗有一部分被透明化」。
+         * 主干内容全部在 #root 内（asar 实证 getElementById('root')），此守卫不影响原职责。 */
+        if (!el.closest('#root')) continue;
         const cs = getComputedStyle(el);
         const bg = cs.backgroundColor;
         if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') continue;
@@ -1448,7 +1472,7 @@ function ensureToggleButton() {
   btn.type = 'button';
   // 桌面壳：DSH 自带 overlayLayer 等覆盖层，z-index 100 会被吞掉点击（实测点了无反应）
   // → 桌面壳抬到顶层；web 形态维持原值
-  const z = isDesktopShell() ? '2147483000' : '100';
+  const z = isDesktopShell() ? '140' : '100';
   btn.style.cssText = [
     `position: fixed; right: 20px; bottom: 20px; z-index: ${z};`,
     'padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(122,242,210,.4);',
