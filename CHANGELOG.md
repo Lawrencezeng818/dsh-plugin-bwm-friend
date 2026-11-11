@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.8.37 (2026-11-11) · 撤回 0.8.36 的错误归因，回滚到发布版行为；重定「视频定格」真凶候选
+
+> 创世者质询：「有现成的代码，你比对一下之前已经发布的版本……为什么要乱改原有已经好的代码？」
+> 逐项比对 `/tmp/pkg080/package/lib/client.js`（发布版 0.8.0）后确认：0.8.36 的两条结论
+> **都不成立**，属于「拿无效测量当实测」+「换掉没坏的代码」。已整体回滚。
+
+### 撤回一：filter+transform 叠加冻结视频 —— 证据无效，已回滚
+
+- 0.8.36 声称「三帧像素完全一致（冻结）；单独任一属性都不冻结」，据此删掉了
+  thinking 的 `transform: scale(1.02)`（发布版 lib/client.js:764 本来就有）。
+- **复核发现测量无效**：留存的截图证据里，实验组（m1v/m2v/m3v）与**对照组**
+  （k1v/k2v/k3v）各自内部 MD5 都完全一致——对照组没变化说明测的根本不是
+  「改动是否冻结画面」；且拍摄时 DSH 窗口被前台应用（WPS/WorkBuddy 弹窗）遮挡。
+  agent 侧也无法可靠把 DSH 切到前台（System Events -10004，`open -a` 激活无效）。
+- **逻辑上也不成立**：发布版 0.8.0 用同一份规则跑了很久，若叠加真是病因，发布版早该复发。
+- **处置**：`PRESENCE_CSS` 恢复与发布版 762-768 逐字一致（transition 含 transform、
+  thinking 恢复 `transform: scale(1.02)`）。
+
+### 撤回二：电源管理重写（converge+看门狗）—— 改的是没坏的代码，已回滚
+
+- 复核 host.log 的 `video.power` 序列：8 次启动（09:38–09:49）**全部**
+  `loadeddata → playing` 收尾，`paused:false`、`readyState:4`，零条
+  pause / hidden / play-rejected 记录 → 媒体元素从未被暂停，也不存在
+  「play 被拒后无人重试」的实际发生场景。
+- **处置**：`bindPowerManagement` 恢复发布版 1075-1104 原实现；`bindOcclusionPause`
+  按发布版 941-951 原样恢复（发布版里同样只有定义、没有调用点，属既有形态，不再动）；
+  删除 `video.power` 诊断上报与 3s 看门狗（诊断使命已完成，证据留在
+  `~/.dsh-bwm-friend/logs/host.log`）。
+
+### 重定真凶候选：0.8.36 新加的输入座位层 `backdrop-filter`
+
+- 时间线：三 bug 修复给 `[class*=composerSeat]` 加了 `rgba(8,13,22,.93)` +
+  `backdrop-filter: blur(18px)`（大面积、直接压在视频可见区上方）→ 随后用户报
+  「执行任务聊天时视频定格」。
+- 旁证：视频在播（paused:false）但画面不动 = 合成层快照不更新，与「backdrop-filter
+  缓存背景快照」的失效模式吻合；发布版对视频上方的遮挡只有**实色渐变 + 左侧一条
+  blur 幕布**（`#bwm-scrim` z5），从不大面积给视频挂 backdrop-filter。
+- **处置**：座位层改为高不透明度**实色** `rgba(9,14,23,.97)`（视频层底色系），
+  删除 backdrop-filter——观感近似磨砂，但不产生背景快照合成层。
+- **新红线（写进 CSS 注释）**：视频可见区上方的遮挡层**禁止 backdrop-filter**，
+  需要磨砂感用实色近似。
+
+### 本版本净变化（相对 v0.8.35 基线，除三 bug 修复外全部回到发布版行为）
+
+- 三 bug 修复保留：标题上移 `mainPanel padding-top`、滚动隔离 `overflow-y:hidden`、
+  抽屉深色调色板 + macOS 白洗等价覆盖（这三条发布版没有对应物，属桌面壳新增）。
+- 输入座位层：不透明底保留、**去 backdrop-filter**（0.8.36 引入的合成层风险清除）。
+- 视频 CSS 与电源管理：与发布版 0.8.0 逐字一致。
+
+## 0.8.36 (2026-11-11) · 修「agent 一思考，右侧视频就定格」【⚠️ 本条两条结论已被 0.8.37 撤回，勿引用】
+
+> 用户报告：干活模式下执行任务聊天时，右侧 Mira 画面停止播放、定格，且不会自行恢复。
+> 排查分两条线，最终确认是**两个独立缺陷**，都已修。
+
+### 缺陷一（真凶）：`filter` + `transform` 在 `<video>` 上叠加 → 画面冻结
+
+- **现象定位**：先排除「播放被暂停」——但宿主日志 `desktop.diag` 里确实出现过
+  `paused:true`（`readyState=4`、`src` 正常），说明还有独立的暂停缺陷（见缺陷二）。
+  真正对应用户描述的是**画面定格但仍在播**：连续截图三帧，像素完全一致。
+- **二分过程**（每轮都截图比对同一裁切区的 MD5）：
+  | 施加在 video 上 | 两帧是否变化 | 结论 |
+  |---|---|---|
+  | `filter: blur(2px) saturate(.9) brightness(1.06)` | 变 | 单独不冻结 |
+  | `transform: scale(1.02)` | 变 | 单独不冻结 |
+  | **两者同时** | **完全一致** | **冻结** |
+  | 真实 `.bwm-thinking` 规则（本就同时含两者） | **完全一致** | **冻结** |
+- **结论**：Chromium(macOS) 在 `filter` 与 `transform` 共存时，会把视频从「直接合成」
+  踢到「读回滤镜再变换」路径，视频帧不再提交——画面停在最后一帧，而 `paused` 仍是
+  `false`，排查时极易误判成播放被暂停。
+- **修复**：`.bwm-thinking video` 去掉 `transform: scale(1.02)`，只保留 `filter`；
+  `.bwm-layer video` 的 transition 一并去掉 transform 项。
+- **红线（已写进 CSS 注释）**：本文件所有视频态**只允许改 `filter`**，任何「放大/位移」
+  类效果必须加在覆盖层，不许碰 video 的 `transform`。
+
+### 缺陷二：`play()` 失败后无任何重试路径 → 暂停后不自愈
+
+- **旧实现**：暂停与恢复各写各的，靠 `video.dataset.wasPlaying` 中间量传递「该不该恢复」；
+  `play()` 被拒时 `.catch(() => {})` 静默吞掉，之后没有任何重试。
+  启动瞬间（窗口不可见/尚未缓冲）被拒一次，视频就永久停在首帧。
+- **重写为「目标态收敛 + 看门狗」**：
+  - `shouldPlay()` 单一判据算目标态（可见 + 未被电池策略降级）；
+  - `converge()` 幂等地把当前态推向目标态，可被任意事件反复调用；
+  - 触发点：`visibilitychange` / `focus` / `pageshow` / 非预期 `pause` / `loadeddata` /
+    **3s 看门狗**（兜住 Chromium 后台节流、GPU 上下文丢失、宿主重排等静默中断）；
+  - 电池逻辑只更新 `onBattery` 标记，暂停与否一律交给 `converge`。
+- 同时删除死代码 `bindOcclusionPause()`（从未被 init 调用，且与电源管理职责重叠——
+  两处各自 pause/play 正是「定格不自愈」的来源之一）。
+- 新增诊断事件 `video.power`（仅桌面壳）：记录 `reason / acted / paused / hidden / readyState`，
+  去重后上报，下次同类问题可直接看日志判定是「被暂停」还是「画面冻结」。
+
+### 验证
+
+- 修复后 video 上只剩 `filter`，无线 `transform`；干净产物重启无 crash、画面正常刷新。
+- 排查期间曾有 3 次 `Desktop renderer exited: killed`，全部发生在实验脚本往 video 上叠加
+  `filter`+`transform` 时，干净产物下未复现——与该组合走危险合成路径的判断一致。
+
 ## 0.8.35 (2026-11-10) · B 批：会话区 / 输入区逐项对齐发布版
 
 > 承接 0.8.30–0.8.34（A 批骨架）。来源仍是 `dsh-plugin-bwm-friend-0.8.0/lib/client.js`
