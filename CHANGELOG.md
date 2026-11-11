@@ -1,5 +1,104 @@
 # Changelog
 
+## 0.8.42 (2026-11-12) · 陪伴模式「没声音」定案：网关开关强制化 + 登录契约对齐鸿蒙发布版
+
+> **创世者授权 CEO 代裁**（2026-11-12 00:56）。`./dm find 网关 / 契约 / key / 对标` 后按
+> **P11**（目的层不可替换：客户登录后由服务端持有 key；dev 后门只是手段层）、
+> **P12**（机制看执行率：0.8.40 代码写全、冒烟全绿，但 `hubBase` 为空 → 执行率 0）、
+> **2026-11-06 v2 裁决**（契约以后端已实现并上线为唯一落地形态，禁止补兼容层）三条判断：
+> **切生产网关、按鸿蒙发布版补齐两段式登录、key 继续留在服务端**；
+> 否掉「本机注入 MiMo key」与「后端加单步登录兼容层」两条分叉路线。
+
+- **根因（不是 MiMo 失效）**：`hubBase` 空 + GUI 启动无 `BWM_AUTH_BASE` → `AUTH_BASE` 空 → dev 后门。
+  实测 `health` = `auth.mode:dev` / `voice.configured:false`；`POST /bwm-friend/tts` 返回
+  `{"ok":false,"error":"missing-key-or-text"}`（HTTP 200）；`POST /companion/chat` 文字正常。
+  `speakReply()` 只判 `data.ok`，失败走空 `catch` → 页面零提示、零声音。
+  生产侧已就位：`/api/v1/gateway/chat` 与 `/gateway/mimo/chat/completions` 无 token 均 401（非 404），
+  广州 `boss-prod-blue` 已部署 `ai_gateway.py` 且 `DEEPSEEK_API_KEY` / `XIAOMI_MIMO_API_KEY` 均已配置。
+- **P12 强制点（本次真正的修复）**：`DEFAULT_CONFIG.hubBase` 由空串改为 `https://laikaton-tech.com`；
+  dev 降级必须显式写 `dev/off`（config 或 env）。配置缺失/空串不再静默退化；
+  `health` 新增 `warnings`、`auth.hubBase`、`voice.viaGateway` 自报运行态。
+- **登录契约（0.8.40 从未做生产端到端验证）**：生产 `/auth/login` 的 `_consume_challenge()` 强制
+  `challenge_id`，缺失返 401 `40108 challenge_required`。对齐鸿蒙发布版
+  `ApiClient.ets:550-575` 两段式（`/auth/challenge` → `/auth/login`，两步 device_id 一致）。
+  同时补齐 `/auth/register`、`/auth/sms/send`、`/auth/refresh` 的防重放三头与显式 JSON Content-Type
+  （生产所有认证端点均 `Depends(verify_replay_headers)`），网关 POST 亦补 Content-Type。
+- **不再静默**：`/bwm-friend/tts` 与 `/companion/chat` 增加结构化审计（ok/error/detail/mode/bytes）；
+  前端 `composerHint` 显示「语音生成中/语音不可用：原因/语音请求失败」；
+  `play()` 被 Chromium 自动播放策略拒绝（`NotAllowedError`）时给「点击这里播放」解锁。
+- **登录 25s 阻塞（端到端实测抓出）**：0.8.40 的 `kcSave()` 用 `execFileSync('security')` 同步写 4 个
+  Keychain 条目，受限 GUI/沙盒会话下每次卡满 5s → 审计实测 `POST /auth/login ms=25051 / 13092`，
+  前端一直转「登录中…」甚至判网络异常。改为异步 fire-and-forget（失败落 `keychain.save_failed` 审计），
+  读取超时 5000→2000ms；修后同一链路 `ms=25`，端到端复测登录/聊天/TTS 全绿。
+- **发送链**：`companion-chat.js` 被 HTML 与 `companion-init.js` 各注入一次 → 双绑 submit；
+  加幂等守卫。登录门禁新增 `hideGate()`，设置面板登录（不 reload）也主动清门；
+  发送前对 `gateEl` 残留复核 `/auth/status`，不再让闭包变量静默吞掉消息。
+- **未改**：0.8.41 的黑幕修复与 0.8.0 发布版视频/电源管理行为，逐字未动。
+- **0.8.40 / 0.8.41 此前未提交**，本版本一并打基线。
+
+## 0.8.41 (2026-11-11) · 修「陪伴切回干活 → 左侧 58vw 硬边纯黑矩形」
+
+> **撤回 0.8.40 的黑幕归因**：0.8.40 判为「抽屉 + 全屏 black scrim 残留」，据此加了
+> 切陪伴前关抽屉 + companion 模式禁显示。创世者复验截图证明无效——现场**没有抽屉**，
+> 是左侧约 58vw 宽、全高、**笔直硬边**的纯黑矩形，右侧人物视频被这条硬边切断。
+> `#bwm-scrim` 带 `mask-image` 右边必须渐隐，形状不符 → 该归因作废。
+> 新判据：黑块尺寸恰等于 `setWorkLayout()` 给 `[class*=mainPanel]` 设的
+> `width:clamp(620px,58vw,940px) × height:100vh` → 真凶是**主干面板自身背景**。
+> 0.8.40 的两条兜底本身无害（模式与抽屉状态机解耦），保留但不再作为本 bug 的修复依据。
+
+- **根因（运行时状态收敛缺口，非 CSS 写错）**：启动时靠 `[800,2500,6000]` 三档
+  `setWorkLayout()` 重 apply + MutationObserver 反复校正，才把主干压回 `transparent`
+  并赢过 DSH ThemeService 随后的主题写入；而 `applyMode` 切回 work **只跑一次**，
+  ThemeService / React 重挂之后把 mainPanel 背景写回深色不透明 → 硬边黑块残留。
+  完全吻合「初始打开正常、切回才黑、感觉没刷新」。日志佐证：启动 diag 的
+  `panelBg=rgba(0,0,0,0)`；切回后无 diag（诊断只拍 3s/9s）→ 上一轮拿不到现场才误判。
+- **修复三条（均幂等、桌面壳专属、web 形态零变化）**：
+  ① 切回 work 复刻启动时的多档收敛（300/1000/2400ms 重 apply），末档拍 diag
+     `tag=switch-work` 留证（panelBg 应为透明）；
+  ② MutationObserver 从纯 700ms 防抖改为「防抖 + 1s 节流上限」，防 DSH 流式输出时
+     高频 DOM 变化把清底无限饿死；
+  ③ CSS 恒定兜底：`body[data-bwm-mode='work']` 下 mainPanel/centerCol 恒透明，
+     React 重挂新节点也自动生效，陪伴态自动失效、无需 JS 还原。精确点名主干布局类，
+     不碰 portal 到 body 直下的原生弹层（0.8.39 红线）。
+- **未动发布版行为**：`#bwm-scrim` 的 `blur(16px)` + 渐变 + mask 与 0.8.0 **逐字相同**；
+  对标确认形状不符（硬边 vs 渐隐）且发布版无复发 → 按红线不删。
+- **0.8.40 尚未提交**，本版本一并包含（陪伴企业化 + 登录门禁 + Hub 网关代理）。
+
+## 0.8.40 (2026-11-11) · 陪伴模式企业化：登录门禁 + Hub 网关代理（对齐鸿蒙版，插件零上游 key）
+
+> 附带修复（同版本）：「从陪伴切回干活，对话框被黑色背景挡住、像没刷新」——
+> 根因：抽屉(z130)+全屏黑 scrim(z110) 均高于陪伴 iframe(z20)，抽屉开着切陪伴时二者浮在陪伴页上、
+> 切回后残留。修法：①切走前 applyMode 强制关抽屉（window.__bwmSetSidebarDrawer 状态同步）；
+> ②CSS 兜底：companion 模式下 scrim/抽屉强制禁显示（模式与抽屉状态机解耦，幂等）。
+> 证据：生产 _diag（15:19）主干透明/视频正常，排除主干清底与视频层；现场截图 + z 层叠链钉死。
+
+> 创世者裁决：完全采纳「网关代理（key 不下发）+ Keychain 持久化 + 保留 dev 后门」方案。
+> 触发：陪伴模式发消息「像卡住」——根因 = MiMo TTS/ASR 依赖 XIAOMI_MIMO_API_KEY env，
+> GUI 启动的 DSH 进程从未配置（1ms 快速失败 missing-key-or-text），语音链路全程静默失效。
+
+### 架构（契约唯一事实源 = ubuntu_hub/routers/ai_gateway.py + libs/schemas/auth_phase1.py）
+
+- **AI 调用全走 Hub 网关**（Hub 模式 = BWM_AUTH_BASE 或 config.hubBase 配置时）：
+  - chat → `POST {HUB}/api/v1/gateway/chat`（messages + system_prompt_override 接管宪法层，
+    max_tokens 200 / temperature 0.8 / thinking 缺省 disabled——与陪伴语义一致，服务端默认值）
+  - TTS/ASR → `POST {HUB}/api/v1/gateway/mimo/chat/completions`（载荷原样透传，响应形状与直连一致）
+  - **插件宿主零上游 key**：DeepSeek/MiMo key 只存在广州 Hub，不下发、不落盘、可吊销、按 subject 计量
+- **登录门禁**：陪伴页加载即查 `/auth/status`，未登录 → 登录卡（登录/注册切换，注册走短信验证码）；
+  chat/proactive 响应 `authRequired` → 弹登录卡；门禁期间拦截聊天提交
+- **注册/短信端点**：`POST /bwm-friend/auth/register`（v8：手机号+短信码+密码≥12位含大小写/数字/符号）、
+  `POST /bwm-friend/auth/sms`（= /auth/sms/send）
+- **会话持久化（对齐鸿蒙 SecureStore）**：token/refreshToken/subject/deviceId 存 macOS Keychain
+  （`security` CLI，service=dsh-bwm-friend-session），启动自动恢复；401 → refresh 轮换一次重试 →
+  仍 401 登出回登录卡；deviceId 跨会话稳定（服务端一致性校验 40011）
+- **hubBase 配置兜底**：桌面壳 GUI 启动无 shell env → readConfig 从 config.json `hubBase` 回填
+  （env BWM_AUTH_BASE 优先）；settings schema additionalProperties 未设 → 未知键放行，PUT 兼容
+- **dev 后门保留**：hubBase 未配置 = 本地 credentials.yaml 直连（原行为零变化），生产不带
+
+### 其他
+
+- 人格+记忆注入组装抽为 `buildPersonaParts()`（dev/Hub 两分支共用，单一来源防漂移）
+- 修正 dev 分支次序回归风险：message.slice(2000) 与 rememberUserMessage 恢复到人格组装之前
+
 ## 0.8.39 (2026-11-11) · 修「设置弹窗打开后有一部分被透明化」：清底函数限定主干 #root 子树
 
 > 创世者报告：0.8.38 后设置弹窗能正常弹出了，但**弹窗有一部分区域被透明化**

@@ -742,6 +742,24 @@ body[data-bwm-mode='work'] .bwm-sb [class*=newSession]:hover {
   background: rgb(255 255 255 / 0.2) !important;
 }
 #bwm-sidebar-scrim { z-index: 110; } /* topbar(120) 与抽屉(130) 之下、内容(≤101) 之上：点击外部关抽屉，但永不吞 DSH 弹层(900+) 的点击 */
+/* 0.8.40 CSS 兜底：陪伴 iframe 只有 z20，抽屉(130)/全屏黑 scrim(110) 会浮在陪伴页上
+   （JS 已在切走前关抽屉，这里再防「陪伴模式下经 topbar 胶囊重新打开」的路径——
+   模式切换与抽屉状态机解耦，CSS 按模式强制禁显示，幂等、不看 JS 状态） */
+body[data-bwm-mode='companion'] #bwm-sidebar-scrim { display: none !important; }
+body[data-bwm-mode='companion'] .bwm-sb { transform: translateX(-101%) !important; }
+/* 0.8.41 恒定兜底：「陪伴切回干活 → 左侧 58vw 硬边纯黑矩形」。
+   setWorkLayout() 给主干写 inline background:transparent，但 DSH ThemeService /
+   React 重挂会在之后把面板背景写回深色不透明；启动时靠多档重 apply 压住，
+   切回时只跑一次 → 黑块残留（用户描述「跟初始打开不一样、感觉没刷新」）。
+   改由模式属性恒定保证：work 态主干容器恒透明，React 重挂新节点也自动生效，
+   陪伴态自动失效、无需 JS 还原。作用域限定 #root（0.8.39 已实证主干全在 #root 内、
+   原生弹层 portal 到 body 直下在 #root 之外）——宽泛类名选择器不带边界，正是
+   0.8.39「设置弹窗被透明化」的教训。不改变视觉设计，幕布 #bwm-scrim 不受影响。 */
+body[data-bwm-mode='work'] #root [class*=mainPanel],
+body[data-bwm-mode='work'] #root [class*=centerCol] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
 `;
 
 let desktopSkinDone = false;
@@ -1428,6 +1446,9 @@ function wireSidebarDrawer(adapter) {
     scrim.classList.toggle('on', v);
     if (!topbarPill) toggleBtn.textContent = v ? '✕' : '☰'; // topbar 胶囊文案固定
   };
+  // 0.8.40：暴露给 applyMode——切陪伴前必须关抽屉（scrim z110 / 抽屉 z130 > iframe z20，
+  // 不关会浮在陪伴页上且切回残留）。同一渲染端单例，直接挂 window 无冲突。
+  try { window.__bwmSetSidebarDrawer = setOpen; } catch (_) { /* noop */ }
   toggleBtn.addEventListener('click', () => setOpen(!open));
   scrim.addEventListener('click', () => setOpen(false));
   // 默认收起（聊天+舞台占满全宽）；DSH shell 异步渲染，侧边栏出现前重试
@@ -1499,6 +1520,13 @@ function wireToggle(bus, context, adapter, btn) {
     // 保持深色无副作用。
     // 陪伴模式 iframe：显示 bwm friend 聊天页（外观与原版一致）；work 模式隐藏
     if (mode === 'companion') {
+      /* 0.8.40 修「切回干活后对话框被黑色背景挡住、像没刷新」：
+       * 抽屉(z130)+全屏黑 scrim(z110, rgba(8,13,22,.3)) 都高于陪伴 iframe(z20)——
+       * 「工作区抽屉开着 → 点陪伴」时二者浮在陪伴页上，切回后仍残留（实测截图钉死）。
+       * 切走前强制关抽屉（状态同步）；陪伴中再开由 CSS 兜底禁显示（见 DESKTOP_WORK_SKIN_CSS 末尾）。 */
+      if (typeof window !== 'undefined' && window.__bwmSetSidebarDrawer) {
+        try { window.__bwmSetSidebarDrawer(false); } catch (_) { /* noop */ }
+      }
       const frame = ensureCompanionFrame();
       if (frame && !frame.src) frame.src = '/bwm-friend/companion/';
       if (frame) frame.style.display = 'block';
@@ -1511,6 +1539,26 @@ function wireToggle(bus, context, adapter, btn) {
         if (mode === 'work') adapter.setWorkLayout();
         else adapter.restoreLayout();
       } catch (e) { console.error('[bwm] layout error', e); }
+    }
+    /* 0.8.41 修「陪伴切回干活 → 左侧 58vw 硬边纯黑矩形」：
+     * 启动时靠 [800,2500,6000] 三档重 apply + MutationObserver 反复校正，才把主干面板
+     * 压回 transparent 并赢过 DSH ThemeService 随后的主题写入；而 applyMode 切回 work
+     * 只跑一次 setWorkLayout()，ThemeService / React 重挂之后把 mainPanel 背景写回
+     * 深色不透明 → 留下恰好 width:clamp(620px,58vw,940px) × 100vh 的硬边黑块。
+     * 修复：切回 work 复刻启动时的多档收敛（桌面壳专属，web 形态零变化），
+     * 末档拍一次 diag 留证（tag=switch-work，panelBg 应为 rgba(0,0,0,0)）。 */
+    if (mode === 'work' && isDesktopShell()) {
+      for (const ms of [300, 1000, 2400]) {
+        setTimeout(() => {
+          if (document.body.getAttribute('data-bwm-mode') !== 'work') return;
+          try { adapter.setWorkLayout(); } catch (_) { /* noop */ }
+        }, ms);
+      }
+      setTimeout(() => {
+        if (document.body.getAttribute('data-bwm-mode') === 'work') {
+          try { postDesktopDiag('switch-work'); } catch (_) { /* noop */ }
+        }
+      }, 2500);
     }
     if (opts.persist !== false) {
       // 写 ui.mode（阶段二唯一权威）。顶层 mode 不在 host 设置白名单内（会被
@@ -2140,12 +2188,20 @@ function apply(ctx) {
   // 多次定时全量 re-apply 覆盖首屏晚到的面板（侧栏/右侧预览列都是延迟挂载的）。
   if (desktopShell) {
     let relayoutTimer = null;
+    let lastCorrect = 0;
     const isWork = () => document.body.getAttribute('data-bwm-mode') === 'work';
-    const correct = () => { if (isWork()) { try { adapter.setWorkLayout(); } catch (_) { /* noop */ } } };
+    const correct = () => {
+      lastCorrect = Date.now();
+      if (isWork()) { try { adapter.setWorkLayout(); } catch (_) { /* noop */ } }
+    };
     try {
       new MutationObserver(() => {
         clearTimeout(relayoutTimer);
-        relayoutTimer = setTimeout(correct, 700);
+        /* 0.8.41：纯 700ms 防抖会被 DSH 高频重渲染（流式输出时 DOM 变化不间断）
+         * 无限推迟 → 切回后的清底永远没人补跑。加 1s 节流上限：距上次校正超过 1s
+         * 就立即跑，否则仍防抖 700ms。保证最长 1s 必收敛一次，且正常态不增加开销。 */
+        const wait = Date.now() - lastCorrect > 1000 ? 0 : 700;
+        relayoutTimer = setTimeout(correct, wait);
       }).observe(document.body, { childList: true, subtree: true });
     } catch (_) { /* noop */ }
     for (const ms of [800, 2500, 6000]) {
