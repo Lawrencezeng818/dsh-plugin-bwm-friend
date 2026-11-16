@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.45 (2026-11-16) · 探针观测面重定向：从「服务生死」改问「用户意图」
+
+> 创世者实测 0.8.44：插件形态下拨禁用，界面没有自动刷回原生。取证：
+> health 在拨禁用后**持续 200**（uptime 不重置）——dshmarket 的 `hotUnmount` 只卸
+> 本次市场进程内 hotMount 的实例，bundle 层条目禁用走「持久化补丁行 + 重启生效」
+> 契约（routes.ts `setPluginEnabled`：hotUnmount 失败即视为 user-patch-managed，
+> 持久化即契约）。服务活着 ≠ 插件在用，health 探针永远等不到信号。
+
+- **观测面重定向（§0.4 重写）**：改问 dshmarket 的用户意图——
+  `GET /dsh-market/installed`（页面同源、免鉴权、`activation[dsh-plugin-bwm-friend].state`
+  **实时反映禁用态**，实测拨禁用即刻返回 `'disabled'`，尽管服务仍存活）。
+  - 启动：state='disabled' → 不注入（原生保持）+ standby 轮询；
+    state≠'disabled'（重新启用）→ 自动 reload 回归。
+  - 运行中：state 连续 2 次 'disabled'（约 6s）→ 自动 reload 退场。
+  - 兜底：market API 不可达（'unknown'，如市场本身被禁）→ 回退 health 探针
+    （服务死 = 禁用的近似）。启动判定同序：market 先、health 兜底。
+- 门禁全绿：core 78/78、artifact parity、pack smoke。
+
 ## 0.8.44 (2026-11-16) · bundle patch 热挂载纯净化：开关真正一键生效
 
 > 创世者实测 0.8.43：插件市场开关拨动后远超 6 秒无反应，市场面板红字
