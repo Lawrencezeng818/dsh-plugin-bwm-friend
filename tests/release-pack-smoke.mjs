@@ -79,9 +79,22 @@ for (const row of insertRows) {
     Boolean(target) && fileList.includes(String(target).replace(/^\.\//, '')),
   );
 }
-// 部署级组件（factgate）必须显式 disabled——随包 patch 不得活跃引用不随包模块（P0-F 路径B）
+// 部署级组件（factgate）不得出现在随包 patch——0.8.44 起整行移除（比 disabled 更强的隔离：
+// 无任何对包外模块的引用），同时满足 dshmarket 热挂载纯 insert 判定（任何额外字段都会让
+// 禁用/启用开关退化为重启生效，2026-11-16 实测）。启用姿势见 factgate.js 头注。
 const factgateRow = insertRows.find((r) => r.id === 'bwm-friend-factgate');
-ok('patch 条目 bwm-friend-factgate 显式 disabled（部署级显式化）', factgateRow?.disabled === true);
+ok(
+  'patch 不含 bwm-friend-factgate 条目（部署级组件零引用 + 热挂载纯净化）',
+  factgateRow === undefined,
+);
+// 热挂载纯净化：patch 全部 insert 行只允许 id + name 两个键（复刻 dshmarket parseSimplePatch 判据）
+ok(
+  'patch 为纯 insert（每条仅 id+name，可热挂载）',
+  insertRows.length > 0 && insertRows.every((r) => {
+    const keys = Object.keys(r);
+    return keys.every((k) => k === 'id' || k === 'name');
+  }),
+);
 
 // 2. 干净目录安装（依赖从 registry 拉；安装不了的依赖在这里爆）
 execSync(`npm i --no-audit --no-fund --loglevel=error "${tgz}"`, { cwd: tmp, stdio: 'pipe' });

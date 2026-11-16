@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.44 (2026-11-16) · bundle patch 热挂载纯净化：开关真正一键生效
+
+> 创世者实测 0.8.43：插件市场开关拨动后远超 6 秒无反应，市场面板红字
+> 「bundle patch 含配置行/表达式，热挂载仅支持纯 insert，重启后生效」。
+> 根因在 dshmarket `hot.ts parseSimplePatch`：补丁里任何非 `id:`/`name:` 行
+> （我们的 `inject: ['webServer']`、`disabled: false`、`disabled: true`）
+> 会让整份补丁被判「含配置行」→ 禁用/启用只能重启生效。0.8.43 的客户端探针
+> 因此拿不到服务端信号（服务在重启前一直活着），探针本身逻辑无误、被上游卡死。
+
+- **cordis.patch.yml 纯净化**：只保留两条纯 insert（`bwm-friend` + `bwm-friend-invariant`，
+  各仅 id+name 两行）：
+  - `inject: ['webServer']` 删除——模块自身 `export const inject`（lib/index.js:13）已声明，
+    且代码有 webServer 缺席安全退出（index.js:2389）；
+  - invariant 的 `disabled: false` 删除——默认即启用，零行为变化；
+  - factgate 占位行（`disabled: true`）整行移除——该文件不在 npm files 白名单，
+    tgz 形态下本就是永不解析的死占位；对缺失 id 的用户层覆盖行 = warn+skip 无害
+    （vendor/include/src/patch.ts:93）。link:/检出形态启用姿势改为用户层显式 insert
+    整行（factgate.js 头注已更新）。
+- **门禁同步**：release-pack-smoke 原「factgate 显式 disabled」断言升级为
+  「patch 不含 factgate 条目 + 全部 insert 行仅 id+name（可热挂载）」双断言。
+- **验证**：以 dshmarket 同款解析器实测新补丁 parse OK；core 78/78、artifact parity、
+  pack smoke 全绿。
+
 ## 0.8.43 (2026-11-16) · 一键禁用/启用：客户端「禁用自退场」探针 + 发版方式收口
 
 > 创世者实测发现：dshmarket 对本插件「热禁用」后，服务端层即刻重组，但已加载页面里

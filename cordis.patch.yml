@@ -4,17 +4,18 @@
 # client 半经 package.json 的 dsh.client manifest 由 host 自动扫描加载。
 # ⚠️ invariant 条目不声明 inject：invariants 是可选 service（宿主可能未加载），
 #    由 invariant.js 内 ctx.get('invariants') 安全读取——声明必需会 boot pending（实测）。
+# ⚠️ 0.8.44 热挂载纯净化：本文件必须是「纯 insert」——每条仅 id + name 两行。
+#    dshmarket 热挂载解析器（src/hot.ts parseSimplePatch）遇到任何其他字段
+#    （inject/disabled/表达式）会把整份补丁判为「含配置行」→ 禁用/启用开关
+#    只能重启生效（2026-11-16 创世者实测，插件市场红字提示同源）。
+#    - bwm-friend 的 webServer 依赖由模块自身 `export const inject` 声明
+#      （lib/index.js:13），且代码已做 webServer 缺席安全退出（index.js §webServer），
+#      补丁行无需重复声明。
+#    - factgate 部署级 companion 占位行（原 disabled: true）移除——该文件不在
+#      npm files 白名单，tgz 安装形态下本就是永不解析的死占位；link:/检出形态
+#      的部署启用步骤见仓库根 factgate.js 头注（改为用户层显式 insert 整行）。
 - insert:
     - id: bwm-friend
       name: 'dsh-plugin-bwm-friend'
-      inject: ['webServer']
     - id: bwm-friend-invariant
       name: 'dsh-plugin-bwm-friend/invariant'
-      disabled: false
-    # 部署级组件（含本机专属默认域），不随 npm 包发布——随包默认停用，
-    # 不得活跃引用包外文件；部署侧经 profile 用户层 patch 显式复启用
-    # （启用步骤见仓库根 factgate.js 头注；exports['./factgate'] 保留，
-    # 供 link:/检出形态的部署解析）。
-    - id: bwm-friend-factgate
-      name: 'dsh-plugin-bwm-friend/factgate'
-      disabled: true
