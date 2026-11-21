@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.46 (2026-11-21) · 覆写表对账补齐 25 项——文件变更卡白块根因修复
+
+> 创世者实测：聊天里每轮「文件变更卡」（ChangedFiles）头部一块白底，
+> 标题白底白字隐形，卡片下半文件列表正常深色——「控件没有按整体优化显示」。
+
+- **根因**：插件深色化靠 `src/client.js` 手工维护的 `--dsw-alias-*` 覆写表。
+  与 asar 官方 design-platform 深色主题逐项对账：官方 134 个 alias，本表仅 109 个，
+  **漏 25 个**。正中本次 bug 的三个：`--dsw-alias-card-fill`（浅色=neutral-50 近白）、
+  `card-fill-hover`、`card-tile-fill`（50% 白）——被 ChangedFiles 卡 `.header/.tile` 消费；
+  `label-primary` 已被改成近白 → 白底白字。与 0.8.36「个人弹窗看不见」同类根因
+  （当时补了 bg-layer-*，这次漏的是 card-* 族），复发模式 = **覆写表与官方主题逐版漂移**。
+- **修复**：按官方深色原值一次性补齐全部 25 个缺失 token（card-* / hovercard-* /
+  json-tree-* / chart-* / tooltip-label / toast-action / settings-card-* /
+  border-selected / label-on-color / trajectory-accent），对账残差归零；
+  同类白块不再逐个冒头。对账方法可复现：提取 asar 深色块 alias 集合与本表 `comm` 求差。
+- **回滚**：profile `package.json` 改回 `0.8.45.tgz` + `pnpm install`；
+  或 `git revert` 本版本提交。
+
 ## 0.8.45 (2026-11-16) · 探针观测面重定向：从「服务生死」改问「用户意图」
 
 > 创世者实测 0.8.44：插件形态下拨禁用，界面没有自动刷回原生。取证：
