@@ -30,6 +30,7 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "test:core": "cd packages/bwm-runtime-core && node --test test/*.test.js",
+    "test:theme": "node tests/theme-alias-parity.mjs",
     "test:artifact": "node tests/build-artifact-parity.mjs",
     "test:host": "node --test tests/host-endpoints.test.cjs",
     "test:e2e": "node tests/e2e-smoke.cjs",
@@ -38,7 +39,7 @@
     "audit:release": "node scripts/audit-release.mjs",
     "prepack": "node scripts/classify-docs-release.mjs && node scripts/audit-release.mjs --expect-blocked",
     "prepublishOnly": "npm run audit:release",
-    "test": "npm run test:core && npm run test:artifact && npm run test:host && npm run test:e2e"
+    "test": "npm run test:core && npm run test:artifact && npm run test:theme && npm run test:host && npm run test:e2e"
   },
   "dependencies": {
     "@laikaton/bwm-skin-mira": "^1.1.1"

@@ -912,3 +912,5 @@ release-offline 9 · negotiation 6 · protocol-conformance 10 · memory 4 · T1-
 - 默认主题改为甜心女孩（DEFAULT_CONFIG avatar.theme '电竞男友' → '甜心女孩'）
 - companion-init.js pick 逻辑修复：按 config theme 选待机视频（原来写死 idle[0] 不看主题）
 - 皮肤包 bwm-skin-mira 1.1.0：电竞男友 → 甜心女孩资产（idle+talk）
+<!-- 0.8.46 补充（仓内测试设施，不影响已发 tgz） -->
+- **测试设施**：新增 `tests/theme-alias-parity.mjs`（`npm run test:theme`，已并入 `npm test`）——把本次「覆写表 vs 官方深色块逐项对账」固化为回归闸门：从已安装 DSH 的 asar 提取 `body[data-ds-dark-theme]` 块声明的 alias 全集（当前 132 个）与 `src/client.js` 声明求差，**差集非空即 fail**；DSH_ASAR 环境变量可指定安装位；锚点失配（官方换肤值）本身也按失败报出，提示重新人工对账。拦截实测：删除任一声明行 → exit 1。
