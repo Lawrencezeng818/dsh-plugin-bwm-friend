@@ -38,13 +38,16 @@ ok('tarball 不含 factgate.js（部署级组件不入包）', !fileList.some((p
 // 5. 钩子回归断言（P0-2 增量2 · 派单⑤）：prepack/prepublishOnly 必须存在且指向 audit——
 //    防钩子被摘或以 `||`（如 `|| true`）吞掉门禁退出码（本断言直接读 package.json，
 //    不经 --ignore-scripts 旁路）
+//    0.8.48 修订：--expect-blocked 断言随 0.8.47 解冻（commit 4711f0a「prepack 改普通审计」）
+//    一并撤销——解冻后 prepack 必须是**普通审计**，且不得再挂 --expect-blocked
+//    （挂了 = 冻结期口径残留，反而掩盖真红牌）。
 const pkgJson = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
 ok(
-  'scripts.prepack 存在且含 audit-release --expect-blocked（含 classify 前置，无 || 旁路）',
+  'scripts.prepack 存在且含普通 audit-release + classify 前置（解冻后口径，无 --expect-blocked 残留，无 || 旁路）',
   typeof pkgJson.scripts?.prepack === 'string'
     && pkgJson.scripts.prepack.includes('audit-release.mjs')
-    && pkgJson.scripts.prepack.includes('--expect-blocked')
     && pkgJson.scripts.prepack.includes('classify-docs-release.mjs')
+    && !pkgJson.scripts.prepack.includes('--expect-blocked')
     && !pkgJson.scripts.prepack.includes('||'),
 );
 ok(

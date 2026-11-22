@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.48 (2026-11-22) · presence 视觉改挂覆盖层 + 视频/翻转取证探针——ask 弹框定格排查
+
+> 创世者实测：ask 确认框弹出瞬间，右侧人物动画定格（截图存档 2026-11-22）。
+> 排除项：#bwm-scrim（仅干活模式左 58vw）、电源管理（仅 document.hidden）、
+> DSH 宿主 blur（仅小菜单级）。头号嫌疑 = presence 翻转（executing/thinking→idle）
+> 时 video 元素上的 filter/transform + transition（P2-8 自加代码，非 0.8.0 原文）。
+
+- **视觉配方迁移（lib/index.js 桌面父页）**：`#avatarVideo` 上的 filter/transform/transition
+  全部移除，改挂 `stage-frame` 内兄弟覆盖层 `.bwm-presence-veil`（思考=微暗+描边、
+  执行=亮边，opacity 过渡）；video 元素回归零样式，移出桌面壳「video 层 + CSS filter
+  定格家族」风险面（0.8.37 composerSeat 事件同族）。浏览器形态 `src/client.js`
+  PRESENCE_CSS（0.8.0 原文）不动。
+- **取证探针（P0-1）**：① `video.ev`——avatarVideo 的 pause/stalled/waiting/ended/
+  error/emptied 事件快照（paused/readyState/networkState/currentTime/loop/wh/src尾）
+  上报 `_diag` 落 host.log；② `presence.flip`——presence 翻转 from→to + 视频快照。
+  下次复现直接读日志定位定格瞬间的真实媒体事件，不再靠截图猜。
+- 测试：core 78/78、artifact PASS、theme diff=0、pack smoke PASS。
+
+
 ## 0.8.47 (2026-11-22) · 市场发布候选：内联核心注释剥离（发布路径解冻后首版）
 
 > 依据：CEO 仓 `decisions/决策记录_2026-11-22_解除060发布冻结与DSH市场发布路径.md`
