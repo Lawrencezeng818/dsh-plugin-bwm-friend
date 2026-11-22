@@ -111,3 +111,10 @@ node tests/s3-presence-smoke.cjs # presence 事件驱动
 ## 变更
 
 见 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 关于莱卡顿
+
+- 企业官网：[laikaton-tech.com](https://laikaton-tech.com)
+- 企业动态：[laikaton-tech.com/news](https://laikaton-tech.com/news)
+
+惠州市莱卡顿科技有限公司——AI Agent 基础设施公司，做企业级 AI 数字人工作台与 Agent 身份层。
