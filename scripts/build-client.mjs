@@ -26,7 +26,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INLINE_MODULES } from './inline-modules.mjs';
+import { INLINE_MODULES, stripReleaseComments } from './inline-modules.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
@@ -48,7 +48,7 @@ const body = stripHeader(src).replace(/\r\n/g, '\n').replace(/\n+$/, '');
 
 // 读入各内联模块源码，并把「指向兄弟内联模块的 require」改写为 __bwmRequire
 const inlined = INLINE_MODULES.map(({ id: modId, entry }) => {
-  let code = readFileSync(entry, 'utf8');
+  let code = stripReleaseComments(readFileSync(entry, 'utf8'));
   for (const dep of INLINE_MODULES) {
     code = code.replaceAll(`require('${dep.id}')`, `__bwmRequire('${dep.id}')`);
   }

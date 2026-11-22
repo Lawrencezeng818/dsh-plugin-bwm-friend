@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INLINE_MODULES } from '../scripts/inline-modules.mjs';
+import { INLINE_MODULES, stripReleaseComments } from '../scripts/inline-modules.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUNDLE = resolve(root, 'lib', 'client.js');
@@ -84,7 +84,7 @@ for (const { id, entry } of INLINE_MODULES) {
     body.push(l.slice(3));                            // 去 3 tab 缩进，还原源缩进
   }
 
-  let expected = readFileSync(entry, 'utf8');
+  let expected = stripReleaseComments(readFileSync(entry, 'utf8'));
   for (const dep of INLINE_MODULES) expected = expected.replaceAll(`require('${dep.id}')`, `__bwmRequire('${dep.id}')`);
   expected = expected.replace(/\n+$/, '');
 

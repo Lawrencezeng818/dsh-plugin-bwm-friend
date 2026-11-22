@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-bwm-friend",
-  "version": "0.8.46",
+  "version": "0.8.47",
   "description": "BWM Friend × DSH「数字人沉浸式工作台」插件——AI Agent Identity Layer 的 DSH 入口（Presence/Context/Persona 皮肤层）。UI 与业务分离：原生 DSH 业务流 100% 原生，BWM 只做皮肤/外壳。",
   "type": "module",
   "main": "lib/index.js",

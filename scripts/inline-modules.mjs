@@ -23,3 +23,17 @@ export const INLINE_MODULES = [
   // 🔴 禁止在此重新加入上述两条：audit [F] F7/F8 守卫会拦，且构成专利自我公开（R2）。
   { id: '@laikaton/bwm-runtime-core', entry: resolve(RUNTIME_SRC_DIR, 'index.js') },
 ];
+
+/* ── 市场发布加固（0.8.47，决策：decisions/决策记录_2026-11-22_解除060发布冻结与DSH市场发布路径.md 风险1）──
+ * 内联闭源核心随包分发时剥离「整行注释」（// 与 /* 开头的行，含块注释续行 *），
+ * 去除中文设计注释的可读机制说明；行尾内联短注释保留（不触碰字符串内容，零功能风险）。
+ * 构建侧与 parity 校验侧共用本函数（单一来源），校验侧先施加同一变换再比对。 */
+export function stripReleaseComments(code) {
+  return code
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim();
+      return !(t.startsWith('//') || t.startsWith('/*') || t.startsWith('*'));
+    })
+    .join('\n');
+}
