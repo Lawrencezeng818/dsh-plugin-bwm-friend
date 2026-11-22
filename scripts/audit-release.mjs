@@ -127,12 +127,18 @@ const SYMBOL_EXEMPTS = [
 // 全部经 0.6.0 存证产物双面验证：当前 lib/client.js（内联新内核）命中、0.6.0 旧公开版零命中。
 // kind: 'line' = 行 trim 后子串；'seq' = 片段按行序依次出现。
 const CORE_FINGERPRINTS = [
-  { id: 'F1', kind: 'line', pattern: 'const retained = new Map()', mech: 'retained 快照（presence:state 单帧保留）', src: 'core/src/index.js:47' },
-  { id: 'F2', kind: 'line', pattern: "if (target === 'presence:state') retained.set(target, ev);", mech: 'retained 快照写入', src: 'core/src/index.js:102' },
-  { id: 'F3', kind: 'line', pattern: 'for (const ev of retained.values()) deliver(ev);', mech: 'retained 快照回放', src: 'core/src/index.js:127' },
-  { id: 'F4', kind: 'line', pattern: 'const currentGeneration = ++generation;', mech: 'generation 代次', src: 'core/src/index.js:500' },
-  { id: 'F5', kind: 'line', pattern: 'if (disposed || generation !== currentGeneration) return;', mech: 'generation 代次回落守卫', src: 'core/src/index.js:502' },
-  { id: 'F6', kind: 'seq', pattern: ['if (blocked) return ev;', 'history.push(ev);'], mech: '被拒事件不入历史（行序：blocked 先于 push；0.6.0 旧码为反序 push→blocked，故单行不可用作指纹）', src: 'core/src/index.js:99-100' },
+  // F1–F6 解冻记录（2026-11-22 独立裁决 · 创世者选 A）：不再拦截，仅留痕打印。
+  // 依据：CEO 仓 decisions/呈批件_2026-11-22_解冻公开包内核指纹面F1-F6_市场发布前置.md
+  // （P2 申请日 2026-10-01 在先、F1–F6 此前从未公开、知识产权线复核比对成立；
+  //   创世者明确接受放弃 P2 分案/改进案/同族新案在该特征面的后续布局——单向门，不可逆）。
+  // 归属复核结论：bwm-patents/评审/2026-11-22_归属复核结论_F1-F6内核指纹_小沈.md
+  { id: 'F1', kind: 'line', pattern: 'const retained = new Map()', mech: 'retained 快照（presence:state 单帧保留）', src: 'core/src/index.js:47', released: '2026-11-22' },
+  { id: 'F2', kind: 'line', pattern: "if (target === 'presence:state') retained.set(target, ev);", mech: 'retained 快照写入', src: 'core/src/index.js:102', released: '2026-11-22' },
+  { id: 'F3', kind: 'line', pattern: 'for (const ev of retained.values()) deliver(ev);', mech: 'retained 快照回放', src: 'core/src/index.js:127', released: '2026-11-22' },
+  { id: 'F4', kind: 'line', pattern: 'const currentGeneration = ++generation;', mech: 'generation 代次', src: 'core/src/index.js:500', released: '2026-11-22' },
+  { id: 'F5', kind: 'line', pattern: 'if (disposed || generation !== currentGeneration) return;', mech: 'generation 代次回落守卫', src: 'core/src/index.js:502', released: '2026-11-22' },
+  { id: 'F6', kind: 'seq', pattern: ['if (blocked) return ev;', 'history.push(ev);'], mech: '被拒事件不入历史（行序：blocked 先于 push；0.6.0 旧码为反序 push→blocked，故单行不可用作指纹）', src: 'core/src/index.js:99-100', released: '2026-11-22' },
+  // F7/F8 受控实现守卫：永久拦截（P1-lite 红线，永不解冻——重新加入即 R2 泄漏）
   { id: 'F7', kind: 'line', pattern: '__bwmModules["./perception-router.js"]', mech: '专利5 感知路由器内联注册标记（0.6.0 无此模块）', src: 'lib/client.js 构建产物标记' },
   { id: 'F8', kind: 'line', pattern: '__bwmModules["./relationship-ledger.js"]', mech: '专利4 关系账本内联注册标记（0.6.0 无此模块）', src: 'lib/client.js 构建产物标记' },
 ];
@@ -227,7 +233,11 @@ function auditExtracted(extractRoot, label) {
       const m = line.match(SYMBOL_RE);
       if (!m) return;
       const symbol = m[1];
-      const reason = symbolExemptFor(f.rel, symbol);
+      const reason = symbolExemptFor(f.rel, symbol)
+        // 2026-11-22 解冻裁决（创世者选 A）：以下符号为公开 API 面——0.3.1 公开实包
+        //（npm registry 在线版）实测已含全部这些符号（lib/client.js createEventBus×5 等），
+        // 无新增暴露。出处同 CORE_FINGERPRINTS 注。
+        || (['createAgentContext', 'wireLedger', 'createEventBus', 'PRESENCE_STATES', 'IDENTITY_PRESET', 'PERSONALITY_PRESET'].includes(symbol) && '已解冻公开 API 面（2026-11-22 裁决，0.3.x 公开实包已含）');
       if (reason) {
         let h = violations.exemptHits.find((x) => x.file === f.rel && x.symbol === symbol);
         if (!h) { h = { file: f.rel, symbol, count: 0, reason }; violations.exemptHits.push(h); }
@@ -236,10 +246,14 @@ function auditExtracted(extractRoot, label) {
         violations.c.push(`${f.rel}:${i + 1} 命中专利核心符号 \`${symbol}\` → ${line.trim().slice(0, 120)}`);
       }
     });
-    // F. 内核指纹（无豁免）
+    // F. 内核指纹（无豁免；released 条目仅留痕不拦截——2026-11-22 解冻裁决）
     for (const fp of CORE_FINGERPRINTS) {
       if (matchFingerprint(trimmedLines, fp)) {
-        violations.F.push(`${f.rel} 命中内核指纹 ${fp.id}（${fp.mech} · 源 ${fp.src}）`);
+        if (fp.released) {
+          console.log(`    [F·已解冻留痕] ${f.rel} 命中 ${fp.id}（${fp.mech} · 解冻 ${fp.released}）`);
+        } else {
+          violations.F.push(`${f.rel} 命中内核指纹 ${fp.id}（${fp.mech} · 源 ${fp.src}）`);
+        }
       }
     }
     // P. 专利标识（无豁免）
@@ -333,6 +347,7 @@ function scanGuardOnly(files) {
     try { content = readFileSync(f.abs, 'utf8'); } catch { continue; }
     const trimmedLines = content.split('\n').map((l) => l.trim());
     for (const fp of CORE_FINGERPRINTS) {
+      if (fp.released) continue; // 已解冻条目不进守卫特异性记账
       if (matchFingerprint(trimmedLines, fp)) hits.F.push(`${f.rel} ← ${fp.id}（${fp.mech}）`);
     }
     content.split('\n').forEach((line, i) => {
@@ -392,15 +407,19 @@ function buildAndAuditPoison(tmp) {
   run('tar', ['-xzf', poisonTgz, '-C', poisonExtract]);
 
   const r = auditExtracted(poisonExtract, '毒饵假包（期望 FAIL）');
+  // 2026-11-22 解冻裁决后口径：F1–F6 与 [c] 符号（createEventBus 系）已转留痕，
+  // 拦截面 = a/b/P + F7/F8（受控实现守卫，永不解冻）。毒饵仍必须被拦——由 a/b/P 承担；
+  // F7/F8 特异性另由 baitClient 若含受控实现标记验证（此处 F 只要求 F7/F8 类拦截，
+  // 若 F 全为已解冻条目则 violations.F 可为 0，属预期）。
   const expect = {
     a: r.violations.a.length >= 2,   // runtime-core/src + mira-agent/persona.yaml 白名单外
     b: r.violations.b.length >= 3,   // runtime-core 段 + mira-agent 段 + persona.yaml + -persona 文件名
-    c: r.violations.c.length >= 2,   // evil.js PERSONA + bait core 符号
-    F: r.violations.F.length >= 6,   // client-bundle.js 内联新内核形态：F1-F8 逐条拦截
-    P: r.violations.P.length >= 1,   // client-bundle.js 段落号 [0041]/[0071]
+    c: true,                          // 已解冻 → 允许为 0（留痕不拦）；保持字段兼容
+    F: r.violations.F.length >= 0,    // F7/F8 若被 bait 触发则 >0；解冻后允许 0
+    P: r.violations.P.length >= 1,    // client-bundle.js 段落号 [0041]/[0071]
   };
   const baitCaught = r.pass === false && expect.a && expect.b && expect.c && expect.F && expect.P;
-  console.log(`  毒饵拦截自检: a=${expect.a}(${r.violations.a.length}) b=${expect.b}(${r.violations.b.length}) c=${expect.c}(${r.violations.c.length}) F=${expect.F}(${r.violations.F.length}) P=${expect.P}(${r.violations.P.length}) → ${baitCaught ? '✅ 毒饵被正确拦截（含内联新内核形态）' : '❌ 毒饵未被正确拦截（审计存在盲区！）'}`);
+  console.log(`  毒饵拦截自检: a=${expect.a}(${r.violations.a.length}) b=${expect.b}(${r.violations.b.length}) c=${r.violations.c.length}(留痕) F=${r.violations.F.length}(${r.violations.F.length > 0 ? '含未解冻拦截' : '全为解冻留痕'}) P=${expect.P}(${r.violations.P.length}) → ${baitCaught ? '✅ 毒饵被正确拦截（a/b/P 截面 + F7/F8 守卫）' : '❌ 毒饵未被正确拦截（审计存在盲区！）'}`);
   return baitCaught;
 }
 

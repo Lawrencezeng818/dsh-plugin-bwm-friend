@@ -37,7 +37,7 @@
     "test:pack": "node scripts/classify-docs-release.mjs && node tests/release-pack-smoke.mjs",
     "test:fresh": "node tests/release-fresh-dsh.mjs",
     "audit:release": "node scripts/audit-release.mjs",
-    "prepack": "node scripts/classify-docs-release.mjs && node scripts/audit-release.mjs --expect-blocked",
+    "prepack": "node scripts/classify-docs-release.mjs && node scripts/audit-release.mjs",
     "prepublishOnly": "npm run audit:release",
     "test": "npm run test:core && npm run test:artifact && npm run test:theme && npm run test:host && npm run test:e2e"
   },
