@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.49 (2026-11-23) · 发布元信息指向 GitHub 镜像与官网
+
+- `repository` 改指 GitHub（`Lawrencezeng818/dsh-plugin-bwm-friend`），Gitee 保留为国内镜像；
+- `homepage` 指向企业官网 `https://laikaton-tech.com`，`bugs` 指向 GitHub Issues；
+- `author` 补企业署名。功能代码与 0.8.48 完全一致（本版仅元信息，供 DSH 市场收录与 npm 页面展示）。
+
+
 ## 0.8.48 (2026-11-22) · presence 视觉改挂覆盖层 + 视频/翻转取证探针——ask 弹框定格排查
 
 > 创世者实测：ask 确认框弹出瞬间，右侧人物动画定格（截图存档 2026-11-22）。
