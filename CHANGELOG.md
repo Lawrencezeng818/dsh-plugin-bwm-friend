@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.50 (2026-11-25) · 接入宿主鉴权闸门（市场条目安全注记的修复）
+
+> 背景：DSH 插件市场条目被维护者追加注记「Its HTTP routes have no DSH access check,
+> so a web page open in your browser could call them.」。核实成立——`/bwm-friend/*`
+> 此前只跑自建同源防线（`isSameOriginRequest`），没走宿主的登录/鉴权。
+> 本版把宿主的闸门接上，不自己再造第二套登录。
+
+- **双路宿主闸门（`lib/index.js`）**：`connection.requestRejection(req)`（DSH ≤0.2.2，
+  免 inject）→ 缺失时退 `connection.admit(facts)`（≥0.2.3，必须在声明
+  `['connection','connection.authentication']` 的注入作用域里调用）→ 两者皆无则闸门为
+  空、维持原自建防线（更老的宿主零行为变化）。
+- **刻意偏离 dsh-market 参考实现一处**：作用域冷时**不**回退到根 ctx 调 `admit`。参考实现
+  那么做会撞 `cannot get property "connection.authentication" without inject`、被闸门转
+  403 → 每个浏览器（含已登录）全站 403（dsh-market #1299）。我们宁可降级为「无宿主
+  闸门」，也不制造一次全站不可用。
+- **失败姿态 fail-closed**：闸门抛异常记 `host_gate.error` 并应答 403，不 fail-open。
+- **可观测**：`GET /bwm-friend/health` 新增 `components.hostGate.mode`
+  （`requestRejection` / `admit` / `none` / `off`），避免「代码写了没生效」。
+- **退出口**：`BWM_HOST_GATE=off`（桌面壳/自建部署显式关闭；默认开启）。
+- **实证（DSH 0.2.2-rc.5 真实宿主，非模拟）**：改前无会话请求 `/bwm-friend/settings`、
+  `/status` 返回 200 并吐出配置内容；改后同一请求 401，带会话 cookie 仍 200，
+  `health.components.hostGate.mode = "requestRejection"`。
+- **测试**：新增 `tests/host-gate.test.mjs` 16 例（三态 + #1299 回归 + fail-closed +
+  dispose）；core 78/78、artifact PASS、theme diff=0。
+- 未改 `cordis.patch.yml`（保持纯 insert，热挂载开关约束不变）。
+
+
 ## 0.8.49 (2026-11-23) · 发布元信息指向 GitHub 镜像与官网
 
 - `repository` 改指 GitHub（`Lawrencezeng818/dsh-plugin-bwm-friend`），Gitee 保留为国内镜像；
