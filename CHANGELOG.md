@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.51 (2026-11-25) · 修干活模式全废（模板转义）+ 陪伴门禁误伤 work 页 + 市场截图
+
+> 起因不是自检，是**为了拍市场截图去开真实宿主**：页面白屏、按钮点不动。
+> 顺着查下去发现干活模式自 0.8.48 起就是坏的，连续三个版本没人发现——
+> 因为「页面能打开、人物会动」，坏的是脚本解析，不报视觉错误。
+
+- 🔴 **`work-chat.js` 整个文件语法错误（0.8.48 引入，影响 0.8.48/0.8.49/0.8.50）**：
+  `lib/index.js` 用模板字面量携带浏览器脚本，其中写了 `].join('\n')`。模板里的 `\n`
+  被引擎转义成**真实换行**，浏览器收到的是 `].join('` + 换行 + `')` →
+  `Invalid or unexpected token`，整段注入脚本不执行：干活页设置按钮、聊天、切换全部失效。
+  同一文件另两处写的是 `\\n` 才是对的。修法即改回 `\\n`。
+- 🔴 **陪伴门禁在干活页全屏遮罩**：`work-chat.js` 动态加载 `companion-chat.js`，
+  后者 `initGate()` 无条件查登录、未登录就铺 `position:fixed; inset:0; z-index:9999` 的
+  遮罩——干活页（内嵌原生 DSH 工作台）被整页盖死，所有按钮点不动。
+  修法：`initGate()` 在 `body[data-bwm-mode=work]` 时提前返回。**依据是门禁自己的文案**
+  （「陪伴模式需要登录后使用」，不是「BWM 需要登录」），且干活页另设独立「账号 / 会员」区。
+  **未放松鉴权**：未登录点「发送」仍走 `showGate()`。
+- **新增两个自包含护栏**（不需要起宿主、不需要浏览器，`node --test` 即可）：
+  - `tests/injected-scripts.test.mjs`（6 例）：把源码模板按 JS 规则还原成**浏览器真正收到的
+    字符串**再要求其可解析——再写错一处 `\n` 即红。**鉴别力已实测**：把 `\\n` 还原成 `\n`，
+    该用例精确报 `not ok 5`。
+  - `tests/screenshots-declaration.test.mjs`（3 例）：按上游三条硬规则自检截图声明
+    （1–8 条、相对路径、文件存在、GitHub 托管限制）+ 单张 ≤1.5MB。
+  - 两者已挂进 `npm test`（`test:inject` / `test:shots`），排在需要外部沙盒的 `test:host` 之前。
+- **市场截图（`screenshots.json` + `docs/screenshots/`）**：按上游约定在 `package.json`
+  旁声明 3 张，推自己仓库即生效、无需 PR。图全部来自真实宿主实拍（`@deepseek-ai/dsh`
+  挂 web profile，1600×1000 @2x 降采样，JPEG q92，合计 415KB）：
+  1. `01-work-dsh-workbench.jpg` 干活模式——右侧数字人 + 左侧原生 DSH 工作台；
+  2. `02-stage-settings.jpg` 「她的舞台」角色设置（预设模板 / 音色 / 自定义 / 人格）；
+  3. `03-companion.jpg` 陪伴模式。
+  旧的 `companion-page-1600x1000-v0.5.0.png` 已删（界面停在 0.5.0，留着会让市场抓到过期形态）。
+- **实证**：修后 `work-chat.js` 通过 `node --check`（20695B）；未登录对照实验——
+  `/work/` 无门禁、`/companion/` 门禁仍在（`pointerEvents:auto`）；浏览器控制台 0 pageerror。
+- 兼容性：`hostGate.mode` 在 DSH 0.1.1-rc.2 上为 `none`（该版本无 `requestRejection`/`admit`），
+  属设计内降级，非回归。
+
+
 ## 0.8.50 (2026-11-25) · 接入宿主鉴权闸门（市场条目安全注记的修复）
 
 > 背景：DSH 插件市场条目被维护者追加注记「Its HTTP routes have no DSH access check,

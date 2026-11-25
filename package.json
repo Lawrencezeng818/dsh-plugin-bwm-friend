@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-bwm-friend",
-  "version": "0.8.50",
+  "version": "0.8.51",
   "description": "BWM Friend × DSH「数字人沉浸式工作台」插件——AI Agent Identity Layer 的 DSH 入口（Presence/Context/Persona 皮肤层）。UI 与业务分离：原生 DSH 业务流 100% 原生，BWM 只做皮肤/外壳。",
   "type": "module",
   "main": "lib/index.js",
@@ -25,6 +25,7 @@
     "invariant.js",
     "lib",
     "packages/bwm-protocol/schema",
+    "screenshots.json",
     "static-ui"
   ],
   "scripts": {
@@ -32,6 +33,8 @@
     "test:core": "cd packages/bwm-runtime-core && node --test test/*.test.js",
     "test:theme": "node tests/theme-alias-parity.mjs",
     "test:artifact": "node tests/build-artifact-parity.mjs",
+    "test:inject": "node --test tests/injected-scripts.test.mjs",
+    "test:shots": "node --test tests/screenshots-declaration.test.mjs",
     "test:host": "node --test tests/host-endpoints.test.cjs",
     "test:e2e": "node tests/e2e-smoke.cjs",
     "test:pack": "node scripts/classify-docs-release.mjs && node tests/release-pack-smoke.mjs",
@@ -39,7 +42,7 @@
     "audit:release": "node scripts/audit-release.mjs",
     "prepack": "node scripts/classify-docs-release.mjs && node scripts/audit-release.mjs",
     "prepublishOnly": "npm run audit:release",
-    "test": "npm run test:core && npm run test:artifact && npm run test:theme && npm run test:host && npm run test:e2e"
+    "test": "npm run test:core && npm run test:artifact && npm run test:theme && npm run test:inject && npm run test:shots && npm run test:host && npm run test:e2e"
   },
   "dependencies": {
     "@laikaton/bwm-skin-mira": "^1.1.1"
