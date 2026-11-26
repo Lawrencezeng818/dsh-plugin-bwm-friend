@@ -18,6 +18,7 @@ import assert from 'node:assert'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FILE = join(ROOT, 'screenshots.json')
@@ -64,4 +65,20 @@ test('文件名带序号，保证市场里的展示顺序稳定', () => {
     const base = s.split('/').pop()
     assert.ok(/^\d{2}-/.test(base), `第 ${i + 1} 张建议以两位序号开头（现状：${base}）`)
   })
+})
+
+test('首图不得是大片白底（市场卡片首图决定点不点进来）', () => {
+  const first = load()[0]
+  if (/^https?:/i.test(first)) return // 绝对路径是别家托管，本地无从判断，跳过
+  const abs = resolve(ROOT, first)
+  // 近白像素占比。0.8.52 前首图是 work 页（DSH 原生白底工作台）实测 34.3%，
+  // 缩略图里就是一大片白；深色陪伴图 0%。阈值取 12%：留合理边距，仍能拦住旧图。
+  const py = `from PIL import Image
+import sys
+im = Image.open(sys.argv[1]).convert('RGB').resize((160,100))
+px = list(im.getdata())
+w = sum(1 for r,g,b in px if r>235 and g>235 and b>235)
+print(round(w/len(px)*100,2))`
+  const pct = parseFloat(execFileSync('python3', ['-c', py, abs], { encoding: 'utf8' }).trim())
+  assert.ok(pct < 12, `首图近白像素 ${pct}% ≥ 12%（白底工作台会毁掉市场缩略图），请换深色图`)
 })
