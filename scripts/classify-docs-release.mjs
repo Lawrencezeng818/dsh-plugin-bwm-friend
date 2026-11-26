@@ -34,6 +34,11 @@ const CATEGORY_RULES = [
   { re: /RELEASE-HARDENING/i, cat: '内部运维' },
   { re: /EMBEDDED-AUTOSCROLL-FIX/i, cat: '内部运维' },
   { re: /发布政策/, cat: '内部治理' },
+  // 决策记录与变更说明是内部治理档案，与 取证报告/方案/诊断报告 同类：记的是「为什么这么改」
+  // 与证据链，不是用户需要读的产品规格。先前它们靠词表偶然出包，一旦文件里不含专利字样
+  // 就会被判入包、闸门报红——分类不该靠运气。用户可见的变更由 CHANGELOG.md 承担（随包）。
+  { re: /(^|\/)决策_/, cat: '内部治理' },
+  { re: /CHANGE-NOTE/i, cat: '内部治理' },
 ];
 
 const TEXT_EXTS = new Set(['.md', '.markdown', '.txt', '.html', '.js', '.json', '.yml', '.yaml']);
